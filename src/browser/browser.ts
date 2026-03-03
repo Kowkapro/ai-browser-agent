@@ -125,8 +125,9 @@ function setupPageListeners(page: Page): void {
   // Handle page close — switch to another open tab
   page.on('close', () => {
     if (activePage === page && context) {
-      const pages = context.pages();
-      activePage = pages.length > 0 ? pages[pages.length - 1] : null;
+      // Filter out the closing page (it may still be in the list during the close event)
+      const remaining = context.pages().filter(p => p !== page);
+      activePage = remaining.length > 0 ? remaining[remaining.length - 1] : null;
       if (activePage) {
         logger.info(`Вкладка закрыта. Переключение на: ${activePage.url()}`);
       }
