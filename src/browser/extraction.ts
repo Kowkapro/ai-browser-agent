@@ -25,13 +25,16 @@ export function getRefMap(): Map<number, ElementRef> {
 }
 
 const INTERACTIVE_ROLES = new Set([
+  // Standard form/navigation elements
   'link', 'button', 'textbox', 'checkbox', 'radio',
   'combobox', 'listbox', 'option', 'menuitem', 'menu',
   'tab', 'switch', 'slider', 'spinbutton', 'searchbox',
   'menuitemcheckbox', 'menuitemradio', 'treeitem',
+  // List/table items (email lists, search results, etc.)
+  'listitem', 'row', 'gridcell', 'article',
 ]);
 
-const MAX_ELEMENTS = 80;
+const MAX_ELEMENTS = 120;
 const MAX_TEXT_LENGTH = 3000;
 
 export async function extractPageState(page: Page): Promise<PageSnapshot> {
@@ -95,6 +98,48 @@ export async function extractPageState(page: Page): Promise<PageSnapshot> {
       currentRefMap.set(refCounter, el);
       refCounter++;
     }
+  }
+
+  // Fallback: if ARIA snapshot found very few interactive elements,
+  // scan the DOM for clickable elements that might have been missed
+  if (elements.length < 10) {
+    try {
+      const clickableItems = await page.evaluate(() => {
+        const items: { tag: string; text: string; role: string }[] = [];
+        // Find elements with click handlers or cursor:pointer that are not already ARIA-detected
+        const candidates = document.querySelectorAll(
+          '[onclick], [role="listitem"], [role="row"], [role="article"], ' +
+          'a[href], [data-click-action], [tabindex="0"]'
+        );
+        for (const el of candidates) {
+          if (items.length >= 30) break;
+          const text = (el.textContent || '').trim().slice(0, 100);
+          if (!text || text.length < 3) continue;
+          const role = el.getAttribute('role') || el.tagName.toLowerCase();
+          items.push({ tag: el.tagName.toLowerCase(), text, role });
+        }
+        return items;
+      });
+
+      for (const item of clickableItems) {
+        if (refCounter > MAX_ELEMENTS) break;
+        // Skip if we already have this element from ARIA
+        const alreadyExists = elements.some(e => e.name === item.text);
+        if (alreadyExists) continue;
+
+        const role = item.role || 'button';
+        const el: ElementRef = {
+          ref: refCounter,
+          role,
+          name: item.text,
+          nth: 0,
+          totalSame: 1,
+        };
+        elements.push(el);
+        currentRefMap.set(refCounter, el);
+        refCounter++;
+      }
+    } catch { /* page might not be ready */ }
   }
 
   let text = textParts.join('\n');

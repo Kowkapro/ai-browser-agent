@@ -33,7 +33,7 @@ function detectProvider(): LLMProviderType {
 const provider = detectProvider();
 
 const defaultModels: Record<LLMProviderType, string> = {
-  openai: 'gpt-4o',
+  openai: 'gpt-4.1',
   anthropic: 'claude-sonnet-4-20250514',
 };
 
