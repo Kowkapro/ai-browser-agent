@@ -67,6 +67,9 @@ if (isNaN(maxIterations) || maxIterations < 1) {
   process.exit(1);
 }
 
+// Worker step budget (per subtask)
+const workerMaxSteps = parseInt(process.env.WORKER_MAX_STEPS || '15', 10);
+
 export const config = {
   provider,
   apiKey: provider === 'openai'
@@ -74,5 +77,6 @@ export const config = {
     : process.env.ANTHROPIC_API_KEY!,
   model,
   maxIterations,
+  workerMaxSteps,
   browserDataDir: path.resolve(process.cwd(), 'browser-data'),
 } as const;

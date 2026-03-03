@@ -94,4 +94,41 @@ export const logger = {
     console.log(chalk.white(`  ${summary}`));
     console.log('');
   },
+
+  // === Multi-agent system ===
+
+  coordinator(message: string) {
+    console.log(chalk.blue(`  Координатор: `) + chalk.white(message));
+  },
+
+  coordinatorPlan(strategy: string, subtasks: { id: number; description: string }[]) {
+    console.log('');
+    console.log(chalk.bgBlue.white.bold('  ╔══════════════════════════════════════╗  '));
+    console.log(chalk.bgBlue.white.bold('  ║         ПЛАН КООРДИНАТОРА           ║  '));
+    console.log(chalk.bgBlue.white.bold('  ╚══════════════════════════════════════╝  '));
+    console.log(chalk.blue(`  Стратегия: ${strategy}`));
+    for (const s of subtasks) {
+      console.log(chalk.blue(`  ${s.id}. ${s.description}`));
+    }
+    console.log('');
+  },
+
+  coordinatorSubtask(id: number, total: number, description: string) {
+    console.log('');
+    console.log(chalk.bgMagenta.white.bold(`  ═══ Подзадача ${id}/${total} ═══  `));
+    console.log(chalk.magenta(`  ${description}`));
+    console.log('');
+  },
+
+  worker(message: string) {
+    console.log(chalk.cyan(`  Worker: `) + chalk.white(message));
+  },
+
+  workerStep(n: number, total: number) {
+    console.log(chalk.gray(`\n  ─── Worker шаг ${n}/${total} ───`));
+  },
+
+  validator(message: string) {
+    console.log(chalk.yellow(`  Валидатор: `) + chalk.white(message));
+  },
 };

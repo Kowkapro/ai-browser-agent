@@ -1,100 +1,76 @@
 import type { LLMProvider, MessageContent, ToolUseContent, TextContent } from '../llm/provider.js';
+import type { WorkerReport } from './types.js';
+import type { PageSnapshot } from '../browser/extraction.js';
 import { toolDefinitions } from '../browser/tools.js';
 import { executeAction, type ToolResult } from '../browser/actions.js';
 import { extractPageState } from '../browser/extraction.js';
 import { getActivePage, showAgentOverlay, hideAgentOverlay, takeScreenshot } from '../browser/browser.js';
 import { ConversationHistory } from './history.js';
-import { getSystemPrompt, getPlanningPrompt, getReflectionPrompt, getLoopWarning, getOutcomeAssessmentPrompt } from './prompt.js';
+import { getWorkerSystemPrompt, getReflectionPrompt, getLoopWarning, getOutcomeAssessmentPrompt } from './prompt.js';
 import { config } from '../utils/config.js';
 import { logger } from '../utils/logger.js';
 
 const REFLECTION_INTERVAL = 5;
 const MAX_TEXT_ONLY_RETRIES = 3;
 
-export interface AgentResult {
-  success: boolean;
-  result: string;
-  steps: number;
-}
-
-export async function runAgent(task: string, llm: LLMProvider): Promise<AgentResult> {
+export async function runWorker(
+  subtask: string,
+  llm: LLMProvider,
+  initialPageState: PageSnapshot,
+  completedContext?: string,
+  retryFeedback?: string,
+): Promise<WorkerReport> {
+  // Fresh history for each Worker invocation
   const history = new ConversationHistory();
 
-  // System message
+  // System prompt
   history.addMessage({
     role: 'system',
-    content: [{ type: 'text', text: getSystemPrompt() }],
+    content: [{ type: 'text', text: getWorkerSystemPrompt() }],
   });
 
-  // Initial task + page state
-  const page = getActivePage();
-  const initialSnapshot = await extractPageState(page);
+  // Build initial user message with subtask + context
+  let initialMessage = `Your subtask: ${subtask}`;
+
+  if (completedContext) {
+    initialMessage += `\n\nAlready completed by previous workers:\n${completedContext}`;
+  }
+
+  if (retryFeedback) {
+    initialMessage += `\n\nIMPORTANT — Previous attempt failed. Feedback:\n${retryFeedback}`;
+  }
+
+  initialMessage += `\n\nCurrent browser state:\n${initialPageState.formatted}`;
 
   history.addMessage({
     role: 'user',
-    content: [{
-      type: 'text',
-      text: `Task: ${task}\n\nCurrent browser state:\n${initialSnapshot.formatted}`,
-    }],
+    content: [{ type: 'text', text: initialMessage }],
   });
 
-  logger.agent(`Задача: ${task}`);
-  logger.info(`Начальная страница: ${initialSnapshot.url}`);
+  logger.worker(`Подзадача: ${subtask}`);
 
-  // === Planning phase: ask LLM to create a plan before acting ===
-  logger.info('Составляю план выполнения...');
-
-  const planMessages = history.buildMessages();
-  planMessages.push({
-    role: 'user',
-    content: [{ type: 'text', text: getPlanningPrompt(task) }],
-  });
-
-  let plan = '';
-  try {
-    // Call LLM WITHOUT tools so it can only return text
-    const planResponse = await llm.chat(planMessages, []);
-    const planTextParts = planResponse.content.filter((c): c is TextContent => c.type === 'text');
-    plan = planTextParts.map(t => t.text).join('\n');
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.error(`Ошибка при планировании: ${msg}`);
-    // Continue without plan — not fatal
-  }
-
-  if (plan) {
-    logger.plan(plan);
-    // Add plan to history so the agent follows it during execution
-    history.addMessage({
-      role: 'assistant',
-      content: [{ type: 'text', text: `My plan:\n${plan}` }],
-    });
-    history.addMessage({
-      role: 'user',
-      content: [{ type: 'text', text: 'Good plan. Now execute it step by step. Start with the first action. Remember to use tool calls for every action.' }],
-    });
-  }
-
-  // Show overlay — agent is working
+  // Show overlay
+  const page = getActivePage();
   await showAgentOverlay(page);
-  logger.statusWorking();
 
-  // === Main agent loop ===
+  // === Execution loop ===
+  const maxSteps = config.workerMaxSteps;
   let step = 0;
   let textOnlyRetries = 0;
-  while (step < config.maxIterations) {
+
+  while (step < maxSteps) {
     step++;
-    logger.step(step, config.maxIterations);
+    logger.workerStep(step, maxSteps);
 
     // Build messages with context management
     const messages = history.buildMessages();
 
-    // Inject reflection / loop warning as a NEW message (never mutate history objects)
+    // Inject reflection / loop warning
     if (history.isLooping()) {
-      logger.info('Обнаружено зацикливание — инжектирую предупреждение.');
+      logger.info('Worker: обнаружено зацикливание.');
       messages.push({ role: 'user', content: [{ type: 'text', text: getLoopWarning() }] });
     } else if (history.getStepCount() > 0 && history.getStepCount() % REFLECTION_INTERVAL === 0) {
-      logger.info(`Рефлексия (после ${history.getStepCount()} шагов)...`);
+      logger.info(`Worker: рефлексия (после ${history.getStepCount()} шагов)...`);
       messages.push({ role: 'user', content: [{ type: 'text', text: getReflectionPrompt(history.getStepCount()) }] });
     }
 
@@ -104,50 +80,55 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
       response = await llm.chat(messages, toolDefinitions);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      logger.error(`LLM error: ${msg}`);
-      return { success: false, result: `LLM error: ${msg}`, steps: step };
+      logger.error(`Worker LLM error: ${msg}`);
+      return {
+        success: false,
+        result: `LLM error: ${msg}`,
+        steps: step,
+        finalPageUrl: getActivePage().url(),
+      };
     }
 
-    // Process response content
+    // Process response
     const toolCalls = response.content.filter((c): c is ToolUseContent => c.type === 'tool_use');
     const textParts = response.content.filter((c): c is TextContent => c.type === 'text');
     const assistantText = textParts.map(t => t.text).join('\n');
 
-    // Log agent's thinking
     if (assistantText) {
-      logger.agent(assistantText.length > 200 ? assistantText.slice(0, 200) + '...' : assistantText);
+      logger.worker(assistantText.length > 200 ? assistantText.slice(0, 200) + '...' : assistantText);
     }
 
-    // Add assistant message to history
-    history.addMessage({
-      role: 'assistant',
-      content: response.content,
-    });
+    history.addMessage({ role: 'assistant', content: response.content });
 
-    // No tool calls — nudge the LLM to use a tool instead of just outputting text
+    // No tool calls — nudge LLM
     if (toolCalls.length === 0) {
       textOnlyRetries++;
       if (textOnlyRetries >= MAX_TEXT_ONLY_RETRIES) {
-        logger.error(`LLM ответил текстом ${textOnlyRetries} раз подряд — завершаю.`);
+        logger.error(`Worker: LLM ответил текстом ${textOnlyRetries} раз подряд — завершаю.`);
         await hideAgentOverlay(getActivePage());
-        return { success: false, result: 'LLM repeatedly failed to use tools. Task aborted.', steps: step };
+        return {
+          success: false,
+          result: 'Worker failed: LLM repeatedly did not use tools.',
+          steps: step,
+          finalPageUrl: getActivePage().url(),
+        };
       }
-      logger.info(`LLM ответил текстом без tool call (попытка ${textOnlyRetries}/${MAX_TEXT_ONLY_RETRIES}) — напоминаю.`);
+      logger.info(`Worker: LLM ответил текстом без tool call (${textOnlyRetries}/${MAX_TEXT_ONLY_RETRIES}).`);
       history.addMessage({
         role: 'user',
         content: [{
           type: 'text',
-          text: 'You must ALWAYS respond with a tool call. If you need the user to perform an action (login, CAPTCHA, etc.), use the wait_for_user tool. If the task is complete, use the done tool. Please respond with the appropriate tool call now.',
+          text: 'You must ALWAYS respond with a tool call. If you need the user to perform an action (login, CAPTCHA, etc.), use the wait_for_user tool. If the subtask is complete, use the done tool. Please respond with the appropriate tool call now.',
         }],
       });
       continue;
     }
-    textOnlyRetries = 0; // reset on successful tool call
+    textOnlyRetries = 0;
 
     // Execute each tool call
     let lastResult: ToolResult | undefined;
     for (const tc of toolCalls) {
-      // Handle malformed tool call arguments
+      // Handle malformed arguments
       if (tc.args._parse_error) {
         const result: ToolResult = {
           success: false,
@@ -164,25 +145,23 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
       const result = await executeAction(tc.name, tc.args);
       lastResult = result;
 
-      // Handle "done" tool
+      // Handle "done" tool — Worker reports completion
       if (tc.name === 'done') {
         await hideAgentOverlay(getActivePage());
         history.recordStep(tc.name, tc.args, result.data || '');
         addToolResult(history, tc, result);
         return {
           success: result.success,
-          result: result.data || 'Task completed.',
+          result: result.data || 'Subtask completed.',
           steps: step,
+          finalPageUrl: getActivePage().url(),
         };
       }
 
-      // Record step summary
+      // Record step
       history.recordStep(tc.name, tc.args, result.data || result.error || '');
-
-      // Add tool result to history
       addToolResult(history, tc, result);
 
-      // Log result
       if (result.success) {
         logger.result(result.data || 'OK');
       } else {
@@ -191,21 +170,17 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
       }
     }
 
-    // After executing tools: re-inject overlay (it disappears on navigation)
+    // Re-inject overlay + get fresh page state
     const currentPage = getActivePage();
     await showAgentOverlay(currentPage);
 
-    // Get fresh page state and append as user message
     const snapshot = await extractPageState(currentPage);
-
-    // Build outcome assessment for the last action (use actual tool result, not URL)
     const lastTc = toolCalls[toolCalls.length - 1];
     const outcomeHint = getOutcomeAssessmentPrompt(
       lastTc.name, lastTc.args,
       lastResult?.data || lastResult?.error || 'unknown',
     );
 
-    // Take a screenshot for visual context (helps agent verify outcomes)
     const pageContent: MessageContent[] = [{
       type: 'text',
       text: `${outcomeHint}\n\nCurrent browser state:\n${snapshot.formatted}`,
@@ -223,13 +198,14 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
     history.addMessage({ role: 'user', content: pageContent });
   }
 
-  // Max iterations reached
+  // Max steps reached
   await hideAgentOverlay(getActivePage());
-  logger.error(`Достигнут лимит шагов (${config.maxIterations}).`);
+  logger.error(`Worker: достигнут лимит шагов (${maxSteps}).`);
   return {
     success: false,
-    result: `Stopped after ${config.maxIterations} steps. Task may be incomplete.`,
-    steps: config.maxIterations,
+    result: `Worker stopped after ${maxSteps} steps. Subtask may be incomplete.`,
+    steps: maxSteps,
+    finalPageUrl: getActivePage().url(),
   };
 }
 
@@ -246,7 +222,6 @@ function addToolResult(
       : `ERROR: ${result.error}${result.suggestion ? `\nSuggestion: ${result.suggestion}` : ''}`,
   }];
 
-  // Attach screenshot if present (on error or screenshot tool)
   if (result.screenshot) {
     content.push({
       type: 'image',

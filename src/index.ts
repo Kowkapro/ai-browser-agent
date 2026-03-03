@@ -3,7 +3,7 @@ import { config } from './utils/config.js';
 import { logger } from './utils/logger.js';
 import { launchBrowser, closeBrowser } from './browser/browser.js';
 import { createProvider } from './llm/provider.js';
-import { runAgent } from './agent/agent.js';
+import { runCoordinator } from './agent/coordinator.js';
 
 async function main() {
   console.log('\n========================================');
@@ -40,11 +40,11 @@ async function main() {
       }
 
       try {
-        const result = await runAgent(task, llm);
+        const result = await runCoordinator(task, llm);
         if (result.success) {
-          logger.statusDone(result.result, result.steps);
+          logger.statusDone(result.result, result.totalSteps);
         } else {
-          logger.statusFailed(result.result, result.steps);
+          logger.statusFailed(result.result, result.totalSteps);
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

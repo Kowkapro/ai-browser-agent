@@ -19,17 +19,23 @@
 ```
 src/
 ├── index.ts              # Entry point: CLI + bootstrap
-│                          calls: agent.ts, browser.ts, config.ts
+│                          calls: coordinator.ts, browser.ts, config.ts
 ├── agent/
-│   ├── agent.ts          # Core agent loop (orchestrator)
+│   ├── coordinator.ts    # Coordinator agent: classify → decompose → dispatch workers
+│   │                      calls: worker.ts, validator.ts, prompt.ts, extraction.ts
+│   ├── worker.ts         # Worker agent: executes single subtask with fresh context
 │   │                      calls: provider.ts, actions.ts, history.ts, extraction.ts
-│   ├── prompt.ts         # System prompt + message formatting
-│   │                      used by: agent.ts
+│   ├── validator.ts      # Validator agent: verifies subtask completion (1 LLM call)
+│   │                      calls: provider.ts, extraction.ts
+│   ├── types.ts          # Shared interfaces: Subtask, WorkerReport, ValidationResult, etc.
+│   │                      used by: coordinator.ts, worker.ts, validator.ts
+│   ├── prompt.ts         # System prompts for all agents + message formatting
+│   │                      used by: coordinator.ts, worker.ts, validator.ts
 │   └── history.ts        # Conversation history + context management
-│                          used by: agent.ts
+│                          used by: worker.ts (fresh instance per subtask)
 ├── llm/
 │   ├── provider.ts       # Abstract LLM interface + factory
-│   │                      used by: agent.ts
+│   │                      used by: coordinator.ts, worker.ts, validator.ts
 │   ├── openai.ts         # OpenAI GPT adapter (implements LLMProvider)
 │   │                      used by: provider.ts factory
 │   └── anthropic.ts      # Anthropic Claude adapter (implements LLMProvider)
@@ -38,11 +44,11 @@ src/
 │   ├── browser.ts        # Playwright browser manager (persistent profile)
 │   │                      calls: Playwright API. used by: index.ts, actions.ts
 │   ├── tools.ts          # Tool definitions (JSON schemas for LLM)
-│   │                      used by: agent.ts (sent to LLM)
+│   │                      used by: worker.ts (sent to LLM)
 │   ├── actions.ts        # Tool implementations (Playwright actions)
-│   │                      calls: browser.ts, extraction.ts. used by: agent.ts
+│   │                      calls: browser.ts, extraction.ts. used by: worker.ts
 │   └── extraction.ts     # DOM-based element extraction -> numbered refs
-│                          calls: page.evaluate() for DOM walking. used by: agent.ts, actions.ts
+│                          calls: page.evaluate() for DOM walking. used by: coordinator.ts, worker.ts, validator.ts
 └── utils/
     ├── config.ts         # .env loading, configuration
     │                      used by: everywhere
@@ -50,17 +56,36 @@ src/
                            used by: everywhere
 ```
 
+### Multi-Agent Architecture
+
+```
+Task → Coordinator → classify (simple/complex?)
+                   ├─ simple → 1 Worker (fresh context) → Validator → done
+                   └─ complex → decompose into subtasks
+                                  → Worker₁ → Validator₁
+                                  → Worker₂ → Validator₂ (sequential, same browser)
+                                  → ...
+                                  → Coordinator final report
+```
+
 ### Call Flow
 
 ```
 index.ts → browser.ts (launch Chromium)
-         → agent.ts (start loop)
-              → extraction.ts (get DOM snapshot)
-              → prompt.ts (build messages)
-              → provider.ts → openai.ts / anthropic.ts (LLM call with tools)
-              → actions.ts → browser.ts (execute tool in browser)
-              → history.ts (save step, manage context window)
-              → repeat until done/max_iterations
+         → coordinator.ts (classify task)
+              ├─ simple: create 1 subtask
+              └─ complex: decompose via LLM → [subtask₁, subtask₂, ...]
+              for each subtask:
+                → worker.ts (fresh ConversationHistory, max 15 steps)
+                     → extraction.ts (get DOM snapshot)
+                     → prompt.ts (build messages)
+                     → provider.ts → openai.ts / anthropic.ts (LLM call with tools)
+                     → actions.ts → browser.ts (execute tool in browser)
+                     → history.ts (save step, manage context window)
+                     → repeat until done/max_steps
+                → validator.ts (1 LLM call: verify completion)
+                     → if not completed: retry worker with feedback (max 2 retries)
+              → final report
 ```
 
 ## How to Run
@@ -87,7 +112,8 @@ npx tsx src/index.ts
 | `OPENAI_API_KEY` | yes* | — | OpenAI API key |
 | `ANTHROPIC_API_KEY` | yes* | — | Anthropic API key (alternative) |
 | `LLM_MODEL` | no | `gpt-4.1` / `claude-sonnet-4-20250514` | Model ID (auto-validated against provider) |
-| `MAX_ITERATIONS` | no | `50` | Max agent steps per task |
+| `MAX_ITERATIONS` | no | `50` | Total step budget across all workers |
+| `WORKER_MAX_STEPS` | no | `15` | Max steps per worker (per subtask) |
 
 *At least one API key required.
 
@@ -97,8 +123,9 @@ npx tsx src/index.ts
 - **3-level fallback click**: normal click → force click → JS click. Каждый уровень проверяет результат.
 - **Smart page load waits**: navigate/click/goBack определяют тип загрузки (навигация vs UI-обновление) и ждут соответственно (`waitForLoadState` вместо хардкод-таймаутов).
 - **Persistent browser profile**: `./browser-data/` сохраняет cookies/sessions между запусками. **SECURITY: эта папка в .gitignore, содержит пароли и сессии.**
-- **Context management**: DOM-based extraction (компактнее полного DOM) + sliding window истории (последние 8 шагов полные, старые — однострочные summaries) + план агента pinned (никогда не сжимается) + truncation текста при >4000 символов.
-- **Self-reflection**: каждые 5 шагов агент оценивает прогресс. Loop detection ловит A-A-A и A-B-A-B паттерны.
+- **Context management**: DOM-based extraction (компактнее полного DOM) + sliding window истории (последние 8 шагов полные, старые — однострочные summaries) + truncation текста при >4000 символов.
+- **Multi-agent architecture (Coordinator → Worker → Validator)**: Coordinator классифицирует задачу (simple/complex), декомпозирует сложные на подзадачи, Worker выполняет каждую подзадачу с ЧИСТЫМ контекстом (свежий ConversationHistory), Validator проверяет результат (1 LLM-вызов). При провале — retry с feedback (макс. 2), при полном провале — re-planning оставшихся подзадач.
+- **Self-reflection**: каждые 5 шагов Worker оценивает прогресс. Loop detection ловит A-A-A и A-B-A-B паттерны.
 - **Extraction retry**: если DOM extraction упал или вернул 0 элементов — автоматический retry через 2с.
 
 ## Conventions
@@ -106,7 +133,7 @@ npx tsx src/index.ts
 - Tool results: `{ success: boolean, data?: string, error?: string, suggestion?: string }`. Ошибки всегда содержат `suggestion` с конкретным следующим шагом.
 - System prompt и tool schemas — на английском (LLM работает точнее). UI/логи — на русском.
 - Конфигурация только через `.env`. Шаблон — `.env.example`.
-- Новый tool: добавить schema в `tools.ts`, реализацию в `actions.ts`, обработку в `agent.ts`.
+- Новый tool: добавить schema в `tools.ts`, реализацию в `actions.ts`, обработку в `worker.ts`.
 
 ## Error Handling
 
@@ -117,9 +144,11 @@ npx tsx src/index.ts
 | Playwright timeout (элемент не найден) | Tool возвращает error + suggestion, агент пробует другой подход |
 | DOM snapshot пустой (SPA loading) | Агент может использовать `wait(2)` + `screenshot()` для повторной попытки |
 | ref не найден (страница изменилась) | Tool возвращает error, агент получает свежий snapshot |
-| Агент зациклился (3+ одинаковых действия) | WARNING injection в prompt, агент меняет стратегию |
-| Превышен max_iterations | Агент останавливается и сообщает о неполном выполнении |
-| LLM отвечает без tool calls 3+ раз подряд | Агент завершается с ошибкой (защита от бесконечного цикла) |
+| Worker зациклился (3+ одинаковых действия) | WARNING injection в prompt, Worker меняет стратегию |
+| Превышен worker_max_steps (15) | Worker останавливается, Coordinator пробует retry |
+| Превышен max_iterations (50 total) | Coordinator останавливается и сообщает о неполном выполнении |
+| LLM отвечает без tool calls 3+ раз подряд | Worker завершается с ошибкой (защита от бесконечного цикла) |
+| Validator не подтвердил подзадачу | Worker retry с feedback (макс. 2 retry), затем re-planning |
 
 ## Known Issues
 

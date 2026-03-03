@@ -157,3 +157,166 @@ export function getOutcomeAssessmentPrompt(toolName: string, toolArgs: Record<st
   return `\nACTION OUTCOME: You just executed ${toolName}(${JSON.stringify(toolArgs)}). Result: "${resultData}".
 Look at the screenshot and new page state carefully. Did this action achieve what you intended? If not, adapt your approach.`;
 }
+
+// === Multi-agent prompts ===
+
+export function getCoordinatorSystemPrompt(): string {
+  return `You are a task coordinator for a browser automation system. Your role is to:
+1. Classify tasks as simple or complex
+2. Decompose complex tasks into ordered subtasks
+3. Each subtask must be independently executable by a browser worker agent
+
+You do NOT interact with the browser directly. You plan and delegate.
+
+Rules:
+- Each subtask must be a single, focused goal achievable in 10-15 browser actions
+- Subtasks execute SEQUENTIALLY on the SAME browser (the page state carries over between subtasks)
+- If a subtask navigates somewhere, the next subtask starts from that page
+- Be specific in subtask descriptions: include URLs, search terms, exact actions needed
+- Never create more than 8 subtasks — if the task is that complex, group related actions
+- Always respond with valid JSON only — no extra text outside the JSON object`;
+}
+
+export function getClassificationPrompt(task: string, pageState: string): string {
+  return `Classify this browser automation task as "simple" or "complex".
+
+A task is SIMPLE if it:
+- Has a single clear goal (e.g., "open google.com", "search for X", "read the first email")
+- Can be completed in one focused browsing session (up to ~15 actions)
+- Does not require switching between different goals or processing multiple independent items
+
+A task is COMPLEX if it:
+- Has multiple independent goals (e.g., "find 5 vacancies AND add each to favorites")
+- Requires processing multiple items with repeated actions (e.g., "check 5 emails and delete spam")
+- Involves multiple websites or significantly different workflows in sequence
+- Contains words like "each", "all", "every", specific counts ("5 items", "3 products")
+
+Task: "${task}"
+
+Current page state:
+${pageState}
+
+Respond with JSON only:
+{
+  "complexity": "simple" or "complex",
+  "reasoning": "brief explanation of why"
+}`;
+}
+
+export function getDecompositionPrompt(task: string, pageState: string): string {
+  return `Decompose this browser automation task into ordered subtasks for a worker agent.
+
+Task: "${task}"
+
+Current page state:
+${pageState}
+
+Rules:
+- Each subtask must be specific and actionable — describe exactly what to do
+- Subtasks run sequentially on the same browser — page state carries over
+- Each subtask should be completable in 10-15 browser actions
+- Include navigation instructions if the worker needs to go to a specific page
+- For repetitive tasks (e.g., "add 5 items to favorites"), create a SETUP subtask first (navigate, search), then one subtask per item
+- The first subtask should handle navigation to the right page and any initial setup (searching, filtering, etc.)
+- Maximum 8 subtasks — group related actions if needed
+- Each subtask description should be self-contained — the worker won't see the original task
+
+Respond with JSON only:
+{
+  "overallStrategy": "brief 1-sentence description of the overall approach",
+  "subtasks": [
+    {
+      "id": 1,
+      "description": "Navigate to hh.ru and search for 'AI engineer' vacancies in Moscow"
+    },
+    {
+      "id": 2,
+      "description": "Open the first vacancy from search results and click 'Add to favorites', then go back to the list"
+    }
+  ]
+}`;
+}
+
+export function getWorkerSystemPrompt(): string {
+  return `${getSystemPrompt()}
+
+## WORKER MODE — ADDITIONAL RULES
+- You are a WORKER agent executing a SINGLE specific subtask assigned by the coordinator.
+- Focus ONLY on your assigned subtask. Do NOT do more than what is described.
+- When your subtask is complete, call done() immediately with a clear summary of what you accomplished.
+- If you receive context about previously completed subtasks, use it to understand the current state — do NOT repeat their work.
+- If you receive retry feedback from a previous failed attempt, adjust your approach based on that feedback.
+- You have a LIMITED step budget — be efficient and direct. Do not waste steps on unnecessary exploration.
+- If you cannot complete the subtask after several attempts, call done() with a description of what went wrong.`;
+}
+
+export function getValidatorPrompt(
+  subtaskDescription: string,
+  workerResult: string,
+  pageState: string,
+): string {
+  return `You are a validation agent. Verify whether this browser subtask was completed successfully.
+
+SUBTASK DESCRIPTION: "${subtaskDescription}"
+
+WORKER'S REPORT: "${workerResult}"
+
+CURRENT PAGE STATE AFTER WORKER FINISHED:
+${pageState}
+
+A screenshot of the current page is also attached. Analyze it carefully.
+
+Your job:
+1. Does the worker's report claim the subtask was completed?
+2. Does the current page state (URL, elements, text) support this claim?
+3. Is there any evidence the subtask was NOT actually completed (error messages, wrong page, missing expected elements)?
+4. If the worker reported failure, is the assessment accurate?
+
+Respond with JSON only:
+{
+  "completed": true or false,
+  "confidence": "high" or "medium" or "low",
+  "reasoning": "what you observed and why you believe the subtask is/isn't completed",
+  "suggestions": "if not completed — what should the worker try differently next time"
+}`;
+}
+
+export function getReplanPrompt(
+  originalTask: string,
+  completedDescriptions: string,
+  failedDescription: string,
+  failedReason: string,
+  remainingDescriptions: string,
+  pageState: string,
+): string {
+  return `A subtask has failed after multiple retries. Re-plan the remaining work.
+
+ORIGINAL TASK: "${originalTask}"
+
+COMPLETED SUBTASKS:
+${completedDescriptions || '(none completed yet)'}
+
+FAILED SUBTASK: ${failedDescription}
+FAILURE REASON: ${failedReason}
+
+REMAINING SUBTASKS (from original plan):
+${remainingDescriptions || '(none remaining)'}
+
+CURRENT PAGE STATE:
+${pageState}
+
+Create a new list of subtasks to complete the remaining work.
+You may modify, merge, reorder, or skip subtasks as needed.
+Account for the failure — maybe a different approach is needed.
+
+Respond with JSON only:
+{
+  "overallStrategy": "updated approach accounting for the failure",
+  "subtasks": [
+    {
+      "id": 1,
+      "description": "specific subtask description"
+    }
+  ]
+}`;
+}
