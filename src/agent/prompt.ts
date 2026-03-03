@@ -20,6 +20,12 @@ export function getSystemPrompt(): string {
 - If you are stuck or going in circles, try a completely different approach.
 - When the task is complete, call done() with a clear summary of what you accomplished.
 
+## User interaction
+- When you encounter a login page, CAPTCHA, two-factor authentication, payment form, or anything requiring the user's personal credentials, use the wait_for_user tool.
+- Provide a clear reason so the user knows what to do (e.g. "Please log in to your account", "Please solve the CAPTCHA").
+- After the user completes the action and presses Enter, the page state will refresh automatically — review it and continue.
+- Do NOT attempt to fill in passwords, personal data, or solve CAPTCHAs yourself.
+
 ## Important
 - You are NOT allowed to make up URLs — navigate to known sites or use search engines.
 - You must NEVER output hardcoded CSS selectors or XPaths — only use ref numbers.

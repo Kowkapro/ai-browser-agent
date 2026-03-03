@@ -1,6 +1,7 @@
-import { getActivePage, takeScreenshot } from './browser.js';
+import { getActivePage, takeScreenshot, hideAgentOverlay, showAgentOverlay } from './browser.js';
 import { getRefMap, type ElementRef } from './extraction.js';
 import { logger } from '../utils/logger.js';
+import * as readline from 'readline';
 
 export interface ToolResult {
   success: boolean;
@@ -16,17 +17,18 @@ export async function executeAction(
 ): Promise<ToolResult> {
   try {
     switch (toolName) {
-      case 'navigate':    return await doNavigate(args);
-      case 'click':       return await doClick(args);
-      case 'type_text':   return await doTypeText(args);
+      case 'navigate':      return await doNavigate(args);
+      case 'click':         return await doClick(args);
+      case 'type_text':     return await doTypeText(args);
       case 'select_option': return await doSelectOption(args);
-      case 'scroll':      return await doScroll(args);
-      case 'go_back':     return await doGoBack();
-      case 'screenshot':  return await doScreenshot();
-      case 'wait':        return await doWait(args);
-      case 'done':        return doDone(args);
+      case 'scroll':        return await doScroll(args);
+      case 'go_back':       return await doGoBack();
+      case 'screenshot':    return await doScreenshot();
+      case 'wait':          return await doWait(args);
+      case 'wait_for_user': return await doWaitForUser(args);
+      case 'done':          return doDone(args);
       default:
-        return { success: false, error: `Unknown tool: ${toolName}`, suggestion: 'Use one of: navigate, click, type_text, select_option, scroll, go_back, screenshot, wait, done.' };
+        return { success: false, error: `Unknown tool: ${toolName}`, suggestion: 'Use one of: navigate, click, type_text, select_option, scroll, go_back, screenshot, wait, wait_for_user, done.' };
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -171,6 +173,31 @@ async function doWait(args: Record<string, unknown>): Promise<ToolResult> {
   await page.waitForTimeout(seconds * 1000);
 
   return { success: true, data: `Waited ${seconds} seconds` };
+}
+
+async function doWaitForUser(args: Record<string, unknown>): Promise<ToolResult> {
+  const reason = args.reason as string || 'Выполните действие в браузере.';
+
+  const page = getActivePage();
+
+  // Hide overlay — user takes control
+  await hideAgentOverlay(page);
+  logger.statusWaitingUser(reason);
+
+  // Wait for Enter in terminal
+  await new Promise<void>((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question('', () => {
+      rl.close();
+      resolve();
+    });
+  });
+
+  // Restore overlay — agent takes control
+  await showAgentOverlay(page);
+  logger.statusWorking();
+
+  return { success: true, data: `User completed action: ${reason}. Resuming.` };
 }
 
 function doDone(args: Record<string, unknown>): ToolResult {

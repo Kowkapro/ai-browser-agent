@@ -109,6 +109,22 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'wait_for_user',
+    description:
+      'Pause and ask the user to perform an action in the browser manually. ' +
+      'Use this when you encounter: login pages, CAPTCHAs, two-factor authentication, ' +
+      'payment forms, or anything that requires the user\'s personal credentials. ' +
+      'The browser border will disappear and the user will see your message. ' +
+      'The agent will resume after the user presses Enter.',
+    parameters: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string', description: 'What the user needs to do, e.g. "Please log in to your account"' },
+      },
+      required: ['reason'],
+    },
+  },
+  {
     name: 'done',
     description:
       'Signal that the task is complete. Provide a summary of what was accomplished. ' +

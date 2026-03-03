@@ -41,15 +41,11 @@ async function main() {
 
       try {
         const result = await runAgent(task, llm);
-        console.log('\n========================================');
         if (result.success) {
-          logger.result(`Готово за ${result.steps} шагов.`);
-          logger.agent(result.result);
+          logger.statusDone(result.result, result.steps);
         } else {
-          logger.error(`Не удалось завершить за ${result.steps} шагов.`);
-          logger.agent(result.result);
+          logger.statusFailed(result.result, result.steps);
         }
-        console.log('========================================');
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         logger.error(`Ошибка агента: ${msg}`);

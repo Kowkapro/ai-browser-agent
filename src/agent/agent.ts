@@ -2,7 +2,7 @@ import type { LLMProvider, MessageContent, ToolUseContent, TextContent } from '.
 import { toolDefinitions } from '../browser/tools.js';
 import { executeAction, type ToolResult } from '../browser/actions.js';
 import { extractPageState } from '../browser/extraction.js';
-import { getActivePage } from '../browser/browser.js';
+import { getActivePage, showAgentOverlay, hideAgentOverlay } from '../browser/browser.js';
 import { ConversationHistory } from './history.js';
 import { getSystemPrompt, getReflectionPrompt, getLoopWarning } from './prompt.js';
 import { config } from '../utils/config.js';
@@ -39,6 +39,10 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
 
   logger.agent(`Задача: ${task}`);
   logger.info(`Начальная страница: ${initialSnapshot.url}`);
+
+  // Show overlay — agent is working
+  await showAgentOverlay(page);
+  logger.statusWorking();
 
   // === Main agent loop ===
   for (let step = 1; step <= config.maxIterations; step++) {
@@ -90,6 +94,7 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
 
     // No tool calls = agent is done or wants to communicate
     if (toolCalls.length === 0) {
+      await hideAgentOverlay(getActivePage());
       return {
         success: true,
         result: assistantText || 'Task completed (no summary provided).',
@@ -103,6 +108,7 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
 
       // Handle "done" tool
       if (tc.name === 'done') {
+        await hideAgentOverlay(getActivePage());
         history.recordStep(tc.name, tc.args, result.data || '');
         addToolResult(history, tc, result);
         return {
@@ -127,8 +133,12 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
       }
     }
 
-    // After executing tools: get fresh page state and append as user message
-    const snapshot = await extractPageState(getActivePage());
+    // After executing tools: re-inject overlay (it disappears on navigation)
+    const currentPage = getActivePage();
+    await showAgentOverlay(currentPage);
+
+    // Get fresh page state and append as user message
+    const snapshot = await extractPageState(currentPage);
     history.addMessage({
       role: 'user',
       content: [{
@@ -139,6 +149,7 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
   }
 
   // Max iterations reached
+  await hideAgentOverlay(getActivePage());
   logger.error(`Достигнут лимит шагов (${config.maxIterations}).`);
   return {
     success: false,
