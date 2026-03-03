@@ -19,7 +19,7 @@ export class OpenAIProvider implements LLMProvider {
   private client: OpenAI;
 
   constructor() {
-    this.client = new OpenAI({ apiKey: config.apiKey });
+    this.client = new OpenAI({ apiKey: config.apiKey, timeout: 60_000 });
   }
 
   async chat(messages: Message[], tools: ToolDefinition[]): Promise<LLMResponse> {
@@ -40,7 +40,8 @@ export class OpenAIProvider implements LLMProvider {
         const isRetryable = this.isRetryableError(error);
         if (isRetryable && attempt < MAX_RETRIES) {
           const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
-          logger.error(`LLM API error (attempt ${attempt}/${MAX_RETRIES}), retrying in ${delay}ms...`);
+          const errMsg = error instanceof Error ? error.message : String(error);
+          logger.error(`LLM API error: ${errMsg} (attempt ${attempt}/${MAX_RETRIES}), retrying in ${delay}ms...`);
           await new Promise(r => setTimeout(r, delay));
           continue;
         }
