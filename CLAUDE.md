@@ -93,10 +93,13 @@ npx tsx src/index.ts
 
 ## Key Architecture Decisions
 
-- **Element resolution via numbered refs**: DOM extraction возвращает `[1] button "Submit"`, агент говорит `click(ref: 1)`. Никаких хардкод-селекторов. Refs пересоздаются при каждом snapshot.
+- **Element resolution via numbered refs**: DOM injection через `page.evaluate()` возвращает `[1] button "Submit"`, агент говорит `click(ref: 1)`. Элементы маркируются `data-agent-ref` атрибутами. Никаких хардкод-селекторов. Refs пересоздаются при каждом snapshot.
+- **3-level fallback click**: normal click → force click → JS click. Каждый уровень проверяет результат.
+- **Smart page load waits**: navigate/click/goBack определяют тип загрузки (навигация vs UI-обновление) и ждут соответственно (`waitForLoadState` вместо хардкод-таймаутов).
 - **Persistent browser profile**: `./browser-data/` сохраняет cookies/sessions между запусками. **SECURITY: эта папка в .gitignore, содержит пароли и сессии.**
-- **Context management**: DOM-based extraction (компактнее полного DOM) + sliding window истории (последние 8 шагов полные, старые — однострочные summaries) + truncation при >4000 символов.
-- **Self-reflection**: каждые 5 шагов агент оценивает прогресс. Loop detection при 3+ одинаковых действиях подряд.
+- **Context management**: DOM-based extraction (компактнее полного DOM) + sliding window истории (последние 8 шагов полные, старые — однострочные summaries) + план агента pinned (никогда не сжимается) + truncation текста при >4000 символов.
+- **Self-reflection**: каждые 5 шагов агент оценивает прогресс. Loop detection ловит A-A-A и A-B-A-B паттерны.
+- **Extraction retry**: если DOM extraction упал или вернул 0 элементов — автоматический retry через 2с.
 
 ## Conventions
 
@@ -127,3 +130,11 @@ npx tsx src/index.ts
 | `punycode` deprecation warning | Node.js 24 deprecated встроенный `punycode` модуль | Косметическая проблема, не влияет на работу. Запускать с `node --no-deprecation` | minor |
 | `page.accessibility.snapshot()` removed | Playwright 1.58 удалил старый API | Заменено на DOM-based extraction через `page.evaluate()` | fixed |
 | Readline ERR_USE_AFTER_CLOSE | stdin закрывается при pipe-вводе | Добавлен флаг `closed` + обработчик `rl.on('close')` | fixed |
+| JS click fallback молча "успешен" | `querySelector` возвращает null, код не проверял | `page.evaluate` возвращает boolean, проверка `!clicked` → error | fixed |
+| Бесконечный nudge loop | Нет счётчика text-only ответов LLM | `textOnlyRetries >= 3` → return error | fixed |
+| `domcontentloaded` не ждёт SPA | SPA рендерит после DOMContentLoaded | `waitUntil: 'load'` + `networkidle(3s)` для navigate/goBack | fixed |
+| Хардкод 800мс после клика | Не определяет произошла ли навигация | URL diff до/после → conditional waitForLoadState | fixed |
+| Extraction error невидима агенту | Ошибка логируется но не передаётся в snapshot | Retry через 1.5с + explicit ERROR banner в snapshot | fixed |
+| Осцилляция не ловится | isLooping проверял только A-A-A | Расширено на A-B-A-B паттерны (4 последних шага) | fixed |
+| Дублирование скриншотов | Screenshot после click + в main loop | Убран screenshot из doClick, оставлен только в main loop | fixed |
+| Malformed JSON в tool_calls | JSON parse → пустой args → cryptic error | `_parse_error` flag → skip execution, return error | fixed |
