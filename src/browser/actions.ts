@@ -57,9 +57,9 @@ async function doNavigate(args: Record<string, unknown>): Promise<ToolResult> {
   const page = getActivePage();
   logger.action('navigate', url);
 
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-  // Extra wait for SPAs
-  await page.waitForTimeout(1000);
+  await page.goto(url, { waitUntil: 'load', timeout: 15000 });
+  // Wait for network to settle (helps with SPAs), but don't block on long-polling
+  try { await page.waitForLoadState('networkidle', { timeout: 3000 }); } catch { /* proceed */ }
 
   return { success: true, data: `Navigated to ${page.url()}` };
 }
@@ -75,6 +75,7 @@ async function doClick(args: Record<string, unknown>): Promise<ToolResult> {
   logger.action('click', `[${ref}] ${element.role} "${element.name}"`);
 
   const locator = buildLocator(page, element);
+  const urlBefore = page.url();
 
   let clicked = false;
 
@@ -99,7 +100,13 @@ async function doClick(args: Record<string, unknown>): Promise<ToolResult> {
     }
   }
 
-  await page.waitForTimeout(800);
+  // Wait for page to settle: if click caused navigation, wait for load; otherwise short delay
+  const urlAfter = page.url();
+  if (urlAfter !== urlBefore) {
+    try { await page.waitForLoadState('load', { timeout: 5000 }); } catch { /* proceed */ }
+  } else {
+    await page.waitForTimeout(300);
+  }
 
   if (!clicked) {
     let screenshot: Buffer | undefined;
