@@ -40,15 +40,20 @@ export class ConversationHistory {
     const systemMsg = this.messages.find(m => m.role === 'system');
     const taskMsg = this.messages.find(m => m.role === 'user');
 
-    // Conversation messages (after system + task): assistant/tool pairs
-    const convMessages = this.messages.filter(
-      m => m !== systemMsg && m !== taskMsg
-    );
+    // Find plan messages (pinned — never compressed away)
+    const planMessages = this.findPlanMessages();
+
+    // Pinned messages that are always preserved
+    const pinned = new Set<Message>([systemMsg, taskMsg, ...planMessages].filter(Boolean) as Message[]);
+
+    // Conversation messages (everything except pinned)
+    const convMessages = this.messages.filter(m => !pinned.has(m));
 
     const result: Message[] = [];
 
     if (systemMsg) result.push(systemMsg);
     if (taskMsg) result.push(taskMsg);
+    for (const pm of planMessages) result.push(pm);
 
     // Group conversation into "turns": each turn starts with an assistant message
     // and includes all following tool results + the next user message (page state).
@@ -66,10 +71,12 @@ export class ConversationHistory {
     if (currentTurn.length > 0) turns.push(currentTurn);
 
     if (turns.length > RECENT_STEPS_LIMIT) {
-      // Compress old steps into a summary
-      const oldStepsCount = Math.max(0, this.stepSummaries.length - RECENT_STEPS_LIMIT);
-      if (oldStepsCount > 0) {
-        const summaryText = this.stepSummaries.slice(0, oldStepsCount).join('\n');
+      // Number of turns being dropped
+      const droppedTurns = turns.length - RECENT_STEPS_LIMIT;
+      // Use the same number for summary slicing (capped to available summaries)
+      const summaryCount = Math.min(droppedTurns, this.stepSummaries.length);
+      if (summaryCount > 0) {
+        const summaryText = this.stepSummaries.slice(0, summaryCount).join('\n');
         result.push({
           role: 'user',
           content: [{ type: 'text', text: `Previous actions summary:\n${summaryText}` }],
@@ -89,14 +96,36 @@ export class ConversationHistory {
     return result;
   }
 
-  /** Detect if the agent is looping (same tool+args 3+ times in a row) */
-  isLooping(): boolean {
-    if (this.stepSummaries.length < 3) return false;
+  /** Find plan-related messages (assistant "My plan:" + user "Good plan...") */
+  private findPlanMessages(): Message[] {
+    const plan: Message[] = [];
+    for (const msg of this.messages) {
+      if (msg.role === 'assistant' && msg.content.some(c => c.type === 'text' && 'text' in c && (c as any).text?.startsWith('My plan:'))) {
+        plan.push(msg);
+      } else if (msg.role === 'user' && msg.content.some(c => c.type === 'text' && 'text' in c && (c as any).text?.startsWith('Good plan.'))) {
+        plan.push(msg);
+      }
+    }
+    return plan;
+  }
 
-    const last3 = this.stepSummaries.slice(-3);
-    // Compare the action part (before "→")
-    const actions = last3.map(s => s.split('→')[0].replace(/Step \d+: /, '').trim());
-    return actions[0] === actions[1] && actions[1] === actions[2];
+  /** Detect if the agent is looping (repeated actions or oscillation patterns) */
+  isLooping(): boolean {
+    const getAction = (s: string) => s.split('→')[0].replace(/Step \d+: /, '').trim();
+
+    // Pattern 1: Same action 3x in a row (A-A-A)
+    if (this.stepSummaries.length >= 3) {
+      const last3 = this.stepSummaries.slice(-3).map(getAction);
+      if (last3[0] === last3[1] && last3[1] === last3[2]) return true;
+    }
+
+    // Pattern 2: Two-action oscillation (A-B-A-B)
+    if (this.stepSummaries.length >= 4) {
+      const last4 = this.stepSummaries.slice(-4).map(getAction);
+      if (last4[0] === last4[2] && last4[1] === last4[3] && last4[0] !== last4[1]) return true;
+    }
+
+    return false;
   }
 }
 
