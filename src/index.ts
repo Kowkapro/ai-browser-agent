@@ -67,8 +67,13 @@ async function main() {
 
   prompt();
 
-  // Graceful shutdown on Ctrl+C
+  // Graceful shutdown on Ctrl+C (guard against double-press)
+  let shuttingDown = false;
   process.on('SIGINT', async () => {
+    if (shuttingDown) {
+      process.exit(1); // force exit on second Ctrl+C
+    }
+    shuttingDown = true;
     console.log('\n');
     logger.info('Ctrl+C — завершение...');
     await cleanup(rl);
