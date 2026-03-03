@@ -9,6 +9,7 @@ import { config } from '../utils/config.js';
 import { logger } from '../utils/logger.js';
 
 const REFLECTION_INTERVAL = 5;
+const MAX_TEXT_ONLY_RETRIES = 3;
 
 export interface AgentResult {
   success: boolean;
@@ -80,6 +81,7 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
 
   // === Main agent loop ===
   let step = 0;
+  let textOnlyRetries = 0;
   while (step < config.maxIterations) {
     step++;
     logger.step(step, config.maxIterations);
@@ -124,8 +126,13 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
 
     // No tool calls — nudge the LLM to use a tool instead of just outputting text
     if (toolCalls.length === 0) {
-      // Give the LLM one chance to correct itself — don't count as a real step
-      logger.info('LLM ответил текстом без tool call — напоминаю использовать инструменты.');
+      textOnlyRetries++;
+      if (textOnlyRetries >= MAX_TEXT_ONLY_RETRIES) {
+        logger.error(`LLM ответил текстом ${textOnlyRetries} раз подряд — завершаю.`);
+        await hideAgentOverlay(getActivePage());
+        return { success: false, result: 'LLM repeatedly failed to use tools. Task aborted.', steps: step };
+      }
+      logger.info(`LLM ответил текстом без tool call (попытка ${textOnlyRetries}/${MAX_TEXT_ONLY_RETRIES}) — напоминаю.`);
       history.addMessage({
         role: 'user',
         content: [{
@@ -133,9 +140,9 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
           text: 'You must ALWAYS respond with a tool call. If you need the user to perform an action (login, CAPTCHA, etc.), use the wait_for_user tool. If the task is complete, use the done tool. Please respond with the appropriate tool call now.',
         }],
       });
-      step--; // don't consume a step for text-only responses
       continue;
     }
+    textOnlyRetries = 0; // reset on successful tool call
 
     // Execute each tool call
     let lastResult: ToolResult | undefined;
