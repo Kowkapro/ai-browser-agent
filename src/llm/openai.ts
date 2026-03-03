@@ -9,6 +9,7 @@ import type {
   ToolDefinition,
   ToolUseContent,
   TextContent,
+  ImageContent,
 } from './provider.js';
 
 const MAX_RETRIES = 3;
@@ -110,6 +111,18 @@ export class OpenAIProvider implements LLMProvider {
               content: c.content,
             });
           }
+        }
+        // OpenAI doesn't support images in tool messages — send as a user message
+        const images = msg.content.filter((c): c is ImageContent => c.type === 'image');
+        if (images.length > 0) {
+          const parts: OpenAI.ChatCompletionContentPart[] = [
+            { type: 'text', text: '[Tool result screenshot]' },
+            ...images.map(c => ({
+              type: 'image_url' as const,
+              image_url: { url: `data:${c.mediaType};base64,${c.base64}` },
+            })),
+          ];
+          result.push({ role: 'user', content: parts });
         }
         continue;
       }
