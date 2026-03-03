@@ -249,11 +249,15 @@ export async function extractPageState(page: Page): Promise<PageSnapshot> {
     extractionError = err instanceof Error ? err.message : String(err);
   }
 
-  // If extraction failed, retry once after a delay
-  if (extractionError) {
-    logger.error(`DOM extraction error: ${extractionError}`);
-    logger.info('Retrying extraction after 1.5s...');
-    await page.waitForTimeout(1500);
+  // If extraction failed or returned no elements (SPA still loading), retry once
+  if (extractionError || rawElements.length === 0) {
+    if (extractionError) {
+      logger.error(`DOM extraction error: ${extractionError}`);
+    } else {
+      logger.info('DOM extraction returned 0 elements (page may be loading).');
+    }
+    logger.info('Retrying extraction after 2s...');
+    await page.waitForTimeout(2000);
     try {
       const retryResult = await runDomExtraction(page);
       rawElements = retryResult.elements;
