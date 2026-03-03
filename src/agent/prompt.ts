@@ -48,6 +48,24 @@ After EVERY click, navigation, or form submission:
 - If you can't find an element: scroll down/up to reveal more elements, or use screenshot() for visual context.
 - NEVER give up after one failure. Try at least 2-3 different approaches before considering the task blocked.
 
+## Reading and analyzing page content
+- The "Page text" section contains the main text content visible on the page.
+- Use this text to UNDERSTAND what is on the page — read email content, article text, product descriptions, etc.
+- When analyzing content (e.g. determining if an email is spam), consider:
+  - The sender name and email address
+  - The subject line
+  - The body content — promotional language, suspicious links, phishing attempts, irrelevant ads
+  - Legitimate transactional emails (order confirmations, password resets, account notifications) are NOT spam
+  - Personal messages from real people are NOT spam
+  - Newsletters the user subscribed to should be treated cautiously — mention them but don't delete without clear spam indicators
+- When the task requires analyzing multiple items:
+  1. Open each item to read its full content (not just the subject from the list)
+  2. Make your assessment based on the content you read
+  3. Take the required action (delete, move, flag, etc.)
+  4. Go back to the list and continue to the next item
+  5. Keep a running tally of your actions for the final report
+- When calling done(), provide a DETAILED summary: what you analyzed, what actions you took, and why.
+
 ## Clicking the right element
 - In lists (emails, search results, products), each item has MULTIPLE links/buttons inside.
 - To OPEN an item (email, article, vacancy), click the link with the SUBJECT/TITLE text — NOT the sender name, avatar, or icon.

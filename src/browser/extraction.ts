@@ -25,7 +25,7 @@ export function getRefMap(): Map<number, ElementRef> {
 }
 
 const MAX_ELEMENTS = 150;
-const MAX_TEXT_LENGTH = 2000;
+const MAX_TEXT_LENGTH = 4000;
 
 /**
  * Extract page state by injecting JavaScript into the page.
@@ -193,7 +193,12 @@ export async function extractPageState(page: Page): Promise<PageSnapshot> {
         // --- Phase 2: Extract page text for context ---
         var textParts: string[] = [];
 
-        var headings = document.querySelectorAll('h1, h2, h3, h4');
+        // Try to find main content area (email body, article, etc.)
+        var mainContent = document.querySelector('main, article, [role="main"], .mail-Message-Body, .message-body, #readmsg, .article-body, .post-content');
+        var contentRoot = mainContent || document.body;
+
+        // Extract headings
+        var headings = contentRoot.querySelectorAll('h1, h2, h3, h4');
         for (var j = 0; j < headings.length; j++) {
           var hText = (headings[j].textContent || '').replace(/\s+/g, ' ').trim();
           if (hText && hText.length > 1) {
@@ -201,12 +206,27 @@ export async function extractPageState(page: Page): Promise<PageSnapshot> {
           }
         }
 
-        var bodyText = (document.body.textContent || '')
-          .replace(/\s+/g, ' ')
-          .trim()
-          .slice(0, 2000);
-        if (bodyText) {
-          textParts.push(bodyText);
+        // Extract structured text blocks (paragraphs, list items, table cells, divs with text)
+        var contentBlocks = contentRoot.querySelectorAll('p, li, td, th, blockquote, pre, [class*="text"], [class*="body"], [class*="content"], [class*="message"]');
+        var seenTexts = new Set<string>();
+
+        for (var cb = 0; cb < contentBlocks.length && textParts.length < 80; cb++) {
+          var blockText = (contentBlocks[cb].textContent || '').replace(/\s+/g, ' ').trim();
+          if (blockText && blockText.length > 10 && !seenTexts.has(blockText.slice(0, 50))) {
+            seenTexts.add(blockText.slice(0, 50));
+            textParts.push(blockText.slice(0, 500));
+          }
+        }
+
+        // If no structured content found, fall back to full text
+        if (textParts.length < 3) {
+          var bodyText = (contentRoot.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 3500);
+          if (bodyText) {
+            textParts.push(bodyText);
+          }
         }
 
         return { elements: elements, pageText: textParts.join('\n'), error: '' };
