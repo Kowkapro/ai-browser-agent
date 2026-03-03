@@ -37,12 +37,42 @@ const defaultModels: Record<LLMProviderType, string> = {
   anthropic: 'claude-sonnet-4-20250514',
 };
 
+// Validate that LLM_MODEL matches the detected provider
+const model = process.env.LLM_MODEL || defaultModels[provider];
+if (process.env.LLM_MODEL) {
+  const isClaudeModel = model.startsWith('claude');
+  if (isClaudeModel && provider === 'openai') {
+    console.error(
+      `\n[ERROR] Model "${model}" is a Claude model, but the detected provider is OpenAI.\n` +
+      'Either set ANTHROPIC_API_KEY in .env, or change LLM_MODEL to an OpenAI model.\n'
+    );
+    process.exit(1);
+  }
+  if (!isClaudeModel && provider === 'anthropic') {
+    console.error(
+      `\n[ERROR] Model "${model}" is not a Claude model, but the detected provider is Anthropic.\n` +
+      'Either set OPENAI_API_KEY in .env, or change LLM_MODEL to a Claude model.\n'
+    );
+    process.exit(1);
+  }
+}
+
+// Validate MAX_ITERATIONS
+const maxIterations = parseInt(process.env.MAX_ITERATIONS || '50', 10);
+if (isNaN(maxIterations) || maxIterations < 1) {
+  console.error(
+    '\n[ERROR] MAX_ITERATIONS must be a positive integer.\n' +
+    `Got: "${process.env.MAX_ITERATIONS}"\n`
+  );
+  process.exit(1);
+}
+
 export const config = {
   provider,
   apiKey: provider === 'openai'
     ? process.env.OPENAI_API_KEY!
     : process.env.ANTHROPIC_API_KEY!,
-  model: process.env.LLM_MODEL || defaultModels[provider],
-  maxIterations: parseInt(process.env.MAX_ITERATIONS || '50', 10),
+  model,
+  maxIterations,
   browserDataDir: path.resolve(process.cwd(), 'browser-data'),
 } as const;
