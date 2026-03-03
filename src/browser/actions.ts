@@ -51,8 +51,13 @@ export async function executeAction(
 // === Tool Implementations ===
 
 async function doNavigate(args: Record<string, unknown>): Promise<ToolResult> {
-  const url = args.url as string;
+  let url = args.url as string;
   if (!url) return { success: false, error: 'Missing "url" parameter.', suggestion: 'Provide a full URL like https://google.com' };
+
+  // Auto-prepend https:// if no protocol specified
+  if (!/^https?:\/\//i.test(url)) {
+    url = 'https://' + url;
+  }
 
   const page = getActivePage();
   logger.action('navigate', url);
@@ -119,11 +124,7 @@ async function doClick(args: Record<string, unknown>): Promise<ToolResult> {
     };
   }
 
-  // Auto-screenshot after click for visual verification
-  let screenshot: Buffer | undefined;
-  try { screenshot = await takeScreenshot(); } catch { /* ignore */ }
-
-  return { success: true, data: `Clicked [${ref}] ${element.role} "${element.name}"`, screenshot };
+  return { success: true, data: `Clicked [${ref}] ${element.role} "${element.name}"` };
 }
 
 async function doTypeText(args: Record<string, unknown>): Promise<ToolResult> {
