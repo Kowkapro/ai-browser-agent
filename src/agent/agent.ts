@@ -85,19 +85,13 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
     // Build messages with context management
     const messages = history.buildMessages();
 
-    // Inject reflection / loop warning
-    const lastMsg = messages[messages.length - 1];
-    if (lastMsg && lastMsg.role === 'user') {
-      const textContent = lastMsg.content.find((c): c is TextContent => c.type === 'text');
-      if (textContent) {
-        if (history.isLooping()) {
-          logger.info('Обнаружено зацикливание — инжектирую предупреждение.');
-          textContent.text += getLoopWarning();
-        } else if (history.getStepCount() > 0 && history.getStepCount() % REFLECTION_INTERVAL === 0) {
-          logger.info(`Рефлексия (после ${history.getStepCount()} шагов)...`);
-          textContent.text += getReflectionPrompt(history.getStepCount());
-        }
-      }
+    // Inject reflection / loop warning as a NEW message (never mutate history objects)
+    if (history.isLooping()) {
+      logger.info('Обнаружено зацикливание — инжектирую предупреждение.');
+      messages.push({ role: 'user', content: [{ type: 'text', text: getLoopWarning() }] });
+    } else if (history.getStepCount() > 0 && history.getStepCount() % REFLECTION_INTERVAL === 0) {
+      logger.info(`Рефлексия (после ${history.getStepCount()} шагов)...`);
+      messages.push({ role: 'user', content: [{ type: 'text', text: getReflectionPrompt(history.getStepCount()) }] });
     }
 
     // Call LLM
