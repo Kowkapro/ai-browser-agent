@@ -40,6 +40,17 @@ export const logger = {
     console.log(chalk.magenta(`  Агент: `) + chalk.white(message));
   },
 
+  plan(planText: string) {
+    console.log('');
+    console.log(chalk.bgBlue.white.bold('  ╔══════════════════════════════════════╗  '));
+    console.log(chalk.bgBlue.white.bold('  ║              ПЛАН                    ║  '));
+    console.log(chalk.bgBlue.white.bold('  ╚══════════════════════════════════════╝  '));
+    for (const line of planText.split('\n')) {
+      console.log(chalk.blue(`  ${line}`));
+    }
+    console.log('');
+  },
+
   step(n: number, total: number) {
     console.log(chalk.gray(`\n  ─── Шаг ${n}/${total} ───`));
   },

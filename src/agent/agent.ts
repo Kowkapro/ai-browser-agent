@@ -4,7 +4,7 @@ import { executeAction, type ToolResult } from '../browser/actions.js';
 import { extractPageState } from '../browser/extraction.js';
 import { getActivePage, showAgentOverlay, hideAgentOverlay } from '../browser/browser.js';
 import { ConversationHistory } from './history.js';
-import { getSystemPrompt, getReflectionPrompt, getLoopWarning } from './prompt.js';
+import { getSystemPrompt, getPlanningPrompt, getReflectionPrompt, getLoopWarning } from './prompt.js';
 import { config } from '../utils/config.js';
 import { logger } from '../utils/logger.js';
 
@@ -39,6 +39,40 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
 
   logger.agent(`Задача: ${task}`);
   logger.info(`Начальная страница: ${initialSnapshot.url}`);
+
+  // === Planning phase: ask LLM to create a plan before acting ===
+  logger.info('Составляю план выполнения...');
+
+  const planMessages = history.buildMessages();
+  planMessages.push({
+    role: 'user',
+    content: [{ type: 'text', text: getPlanningPrompt(task) }],
+  });
+
+  let plan = '';
+  try {
+    // Call LLM WITHOUT tools so it can only return text
+    const planResponse = await llm.chat(planMessages, []);
+    const planTextParts = planResponse.content.filter((c): c is TextContent => c.type === 'text');
+    plan = planTextParts.map(t => t.text).join('\n');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`Ошибка при планировании: ${msg}`);
+    // Continue without plan — not fatal
+  }
+
+  if (plan) {
+    logger.plan(plan);
+    // Add plan to history so the agent follows it during execution
+    history.addMessage({
+      role: 'assistant',
+      content: [{ type: 'text', text: `My plan:\n${plan}` }],
+    });
+    history.addMessage({
+      role: 'user',
+      content: [{ type: 'text', text: 'Good plan. Now execute it step by step. Start with the first action. Remember to use tool calls for every action.' }],
+    });
+  }
 
   // Show overlay — agent is working
   await showAgentOverlay(page);

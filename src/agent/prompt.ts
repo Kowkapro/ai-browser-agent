@@ -60,6 +60,19 @@ export function getSystemPrompt(): string {
 - If a page has a cookie consent popup, dismiss it by clicking the accept/close button.`;
 }
 
+export function getPlanningPrompt(task: string): string {
+  return `Before taking any action, create a step-by-step plan for this task.
+
+Task: "${task}"
+
+Write a numbered plan (5-15 steps) describing WHAT you will do, in order.
+Be specific about which sites to visit, what to search for, what actions to take on each item.
+If the task involves multiple items, describe the repeated pattern.
+If authentication might be needed, include that as a step.
+
+Respond ONLY with the numbered plan, nothing else. Do NOT call any tools yet.`;
+}
+
 export function getReflectionPrompt(stepCount: number): string {
   return `\n\nREFLECTION (step ${stepCount}): Before your next action, briefly assess:
 1. What progress have you made toward the goal?
