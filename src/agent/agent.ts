@@ -79,7 +79,9 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
   logger.statusWorking();
 
   // === Main agent loop ===
-  for (let step = 1; step <= config.maxIterations; step++) {
+  let step = 0;
+  while (step < config.maxIterations) {
+    step++;
     logger.step(step, config.maxIterations);
 
     // Build messages with context management
@@ -122,7 +124,7 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
 
     // No tool calls — nudge the LLM to use a tool instead of just outputting text
     if (toolCalls.length === 0) {
-      // Give the LLM one chance to correct itself
+      // Give the LLM one chance to correct itself — don't count as a real step
       logger.info('LLM ответил текстом без tool call — напоминаю использовать инструменты.');
       history.addMessage({
         role: 'user',
@@ -131,12 +133,15 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
           text: 'You must ALWAYS respond with a tool call. If you need the user to perform an action (login, CAPTCHA, etc.), use the wait_for_user tool. If the task is complete, use the done tool. Please respond with the appropriate tool call now.',
         }],
       });
-      continue; // retry this step
+      step--; // don't consume a step for text-only responses
+      continue;
     }
 
     // Execute each tool call
+    let lastResult: ToolResult | undefined;
     for (const tc of toolCalls) {
       const result = await executeAction(tc.name, tc.args);
+      lastResult = result;
 
       // Handle "done" tool
       if (tc.name === 'done') {
@@ -172,11 +177,11 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
     // Get fresh page state and append as user message
     const snapshot = await extractPageState(currentPage);
 
-    // Build outcome assessment for the last action
+    // Build outcome assessment for the last action (use actual tool result, not URL)
     const lastTc = toolCalls[toolCalls.length - 1];
     const outcomeHint = getOutcomeAssessmentPrompt(
       lastTc.name, lastTc.args,
-      snapshot.url,
+      lastResult?.data || lastResult?.error || 'unknown',
     );
 
     // Take a screenshot for visual context (helps agent verify outcomes)
