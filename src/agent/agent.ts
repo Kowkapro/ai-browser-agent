@@ -53,8 +53,10 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
       const textContent = lastMsg.content.find((c): c is TextContent => c.type === 'text');
       if (textContent) {
         if (history.isLooping()) {
+          logger.info('Обнаружено зацикливание — инжектирую предупреждение.');
           textContent.text += getLoopWarning();
         } else if (history.getStepCount() > 0 && history.getStepCount() % REFLECTION_INTERVAL === 0) {
+          logger.info(`Рефлексия (после ${history.getStepCount()} шагов)...`);
           textContent.text += getReflectionPrompt(history.getStepCount());
         }
       }
@@ -97,8 +99,6 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
 
     // Execute each tool call
     for (const tc of toolCalls) {
-      logger.action(tc.name, JSON.stringify(tc.args));
-
       const result = await executeAction(tc.name, tc.args);
 
       // Handle "done" tool

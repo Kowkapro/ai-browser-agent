@@ -55,12 +55,16 @@ async function main() {
         logger.error(`Ошибка агента: ${msg}`);
       }
 
-      // Prompt for next task
-      prompt();
+      // Prompt for next task or cleanup if stdin closed
+      if (closed) {
+        await cleanup(rl);
+      } else {
+        prompt();
+      }
     });
   };
 
-  // Handle stdin close (piped input)
+  // Handle stdin close (piped input) — just set flag, don't kill browser mid-task
   rl.on('close', () => {
     closed = true;
   });

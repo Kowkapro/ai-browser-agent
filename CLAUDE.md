@@ -122,4 +122,6 @@ npx tsx src/index.ts
 
 | Проблема | Причина | Решение | Статус |
 |----------|---------|---------|--------|
-| | | | |
+| `punycode` deprecation warning | Node.js 24 deprecated встроенный `punycode` модуль | Косметическая проблема, не влияет на работу. Запускать с `node --no-deprecation` | minor |
+| `page.accessibility.snapshot()` removed | Playwright 1.58 удалил старый API | Заменено на `locator.ariaSnapshot()` (YAML формат) | fixed |
+| Readline ERR_USE_AFTER_CLOSE | stdin закрывается при pipe-вводе | Добавлен флаг `closed` + обработчик `rl.on('close')` | fixed |
