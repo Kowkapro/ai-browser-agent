@@ -92,14 +92,18 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
       content: response.content,
     });
 
-    // No tool calls = agent is done or wants to communicate
+    // No tool calls — nudge the LLM to use a tool instead of just outputting text
     if (toolCalls.length === 0) {
-      await hideAgentOverlay(getActivePage());
-      return {
-        success: true,
-        result: assistantText || 'Task completed (no summary provided).',
-        steps: step,
-      };
+      // Give the LLM one chance to correct itself
+      logger.info('LLM ответил текстом без tool call — напоминаю использовать инструменты.');
+      history.addMessage({
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: 'You must ALWAYS respond with a tool call. If you need the user to perform an action (login, CAPTCHA, etc.), use the wait_for_user tool. If the task is complete, use the done tool. Please respond with the appropriate tool call now.',
+        }],
+      });
+      continue; // retry this step
     }
 
     // Execute each tool call
