@@ -26,7 +26,10 @@ async function main() {
     output: process.stdout,
   });
 
+  let closed = false;
+
   const prompt = () => {
+    if (closed) return;
     rl.question('\n> Введите задачу (или "exit" для выхода): ', async (input) => {
       const task = input.trim();
 
@@ -56,6 +59,11 @@ async function main() {
       prompt();
     });
   };
+
+  // Handle stdin close (piped input)
+  rl.on('close', () => {
+    closed = true;
+  });
 
   prompt();
 
