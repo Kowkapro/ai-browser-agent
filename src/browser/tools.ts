@@ -22,7 +22,7 @@ export const toolDefinitions: ToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        ref: { type: 'number', description: 'The ref number of the element to click (e.g. 3)' },
+        ref: { type: 'integer', description: 'The ref number of the element to click (e.g. 3)' },
       },
       required: ['ref'],
     },
@@ -36,7 +36,7 @@ export const toolDefinitions: ToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        ref: { type: 'number', description: 'The ref number of the text input element' },
+        ref: { type: 'integer', description: 'The ref number of the text input element' },
         text: { type: 'string', description: 'The text to type into the field' },
         press_enter: { type: 'boolean', description: 'Whether to press Enter after typing (default: false)' },
       },
@@ -51,7 +51,7 @@ export const toolDefinitions: ToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        ref: { type: 'number', description: 'The ref number of the select/combobox element' },
+        ref: { type: 'integer', description: 'The ref number of the select/combobox element' },
         option: { type: 'string', description: 'The visible text of the option to select' },
       },
       required: ['ref', 'option'],
