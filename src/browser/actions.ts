@@ -76,25 +76,41 @@ async function doClick(args: Record<string, unknown>): Promise<ToolResult> {
 
   const locator = buildLocator(page, element);
 
+  let clicked = false;
+
   try {
     // Normal click with actionability checks
     await locator.click({ timeout: 5000 });
+    clicked = true;
   } catch {
     // Fallback 1: force click (bypasses pointer event interception)
     try {
       logger.info('Normal click blocked — trying force click...');
       await locator.click({ timeout: 3000, force: true });
+      clicked = true;
     } catch {
       // Fallback 2: JavaScript click (bypasses all Playwright checks)
       logger.info('Force click failed — trying JS click...');
-      await page.evaluate((r) => {
+      clicked = await page.evaluate((r) => {
         const el = document.querySelector(`[data-agent-ref="${r}"]`);
-        if (el) (el as HTMLElement).click();
+        if (el) { (el as HTMLElement).click(); return true; }
+        return false;
       }, ref);
     }
   }
 
   await page.waitForTimeout(800);
+
+  if (!clicked) {
+    let screenshot: Buffer | undefined;
+    try { screenshot = await takeScreenshot(); } catch { /* ignore */ }
+    return {
+      success: false,
+      error: `All click attempts failed for [${ref}] ${element.role} "${element.name}". The element may be hidden, overlapped, or removed from the DOM.`,
+      suggestion: 'Take a screenshot to see the page state. Try scrolling to the element, dismissing popups with press_key("Escape"), or using a different element.',
+      screenshot,
+    };
+  }
 
   // Auto-screenshot after click for visual verification
   let screenshot: Buffer | undefined;
