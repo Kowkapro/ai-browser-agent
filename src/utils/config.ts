@@ -58,7 +58,7 @@ if (process.env.LLM_MODEL) {
 }
 
 // Validate MAX_ITERATIONS
-const maxIterations = parseInt(process.env.MAX_ITERATIONS || '50', 10);
+const maxIterations = parseInt(process.env.MAX_ITERATIONS || '100', 10);
 if (isNaN(maxIterations) || maxIterations < 1) {
   console.error(
     '\n[ERROR] MAX_ITERATIONS must be a positive integer.\n' +
@@ -68,7 +68,7 @@ if (isNaN(maxIterations) || maxIterations < 1) {
 }
 
 // Worker step budget (per subtask)
-const workerMaxSteps = parseInt(process.env.WORKER_MAX_STEPS || '15', 10);
+const workerMaxSteps = parseInt(process.env.WORKER_MAX_STEPS || '30', 10);
 
 export const config = {
   provider,

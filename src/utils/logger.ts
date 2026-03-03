@@ -80,8 +80,11 @@ export const logger = {
     console.log(chalk.bgGreen.black.bold('  ╔══════════════════════════════════════╗  '));
     console.log(chalk.bgGreen.black.bold('  ║         ЗАДАЧА ВЫПОЛНЕНА             ║  '));
     console.log(chalk.bgGreen.black.bold('  ╚══════════════════════════════════════╝  '));
-    console.log(chalk.green(`  Шагов: ${steps}`));
-    console.log(chalk.white(`  ${summary}`));
+    console.log(chalk.gray(`  Шагов: ${steps}`));
+    // Print each line of the summary separately for readability
+    for (const line of summary.split('\n')) {
+      if (line.trim()) console.log(chalk.white(`  ${line}`));
+    }
     console.log('');
   },
 
@@ -90,8 +93,10 @@ export const logger = {
     console.log(chalk.bgRed.white.bold('  ╔══════════════════════════════════════╗  '));
     console.log(chalk.bgRed.white.bold('  ║       ЗАДАЧА НЕ ВЫПОЛНЕНА           ║  '));
     console.log(chalk.bgRed.white.bold('  ╚══════════════════════════════════════╝  '));
-    console.log(chalk.red(`  Шагов: ${steps}`));
-    console.log(chalk.white(`  ${summary}`));
+    console.log(chalk.gray(`  Шагов: ${steps}`));
+    for (const line of summary.split('\n')) {
+      if (line.trim()) console.log(chalk.white(`  ${line}`));
+    }
     console.log('');
   },
 

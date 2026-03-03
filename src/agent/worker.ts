@@ -125,9 +125,22 @@ export async function runWorker(
     }
     textOnlyRetries = 0;
 
-    // Execute each tool call
+    // Browser actions are sequential — only execute the first tool call.
+    // If LLM sent multiple, add skip results for the rest to keep history valid.
+    if (toolCalls.length > 1) {
+      logger.info(`Worker: LLM вернул ${toolCalls.length} tool calls — выполняю только первый.`);
+      for (const skipped of toolCalls.slice(1)) {
+        addToolResult(history, skipped, {
+          success: false,
+          error: 'Only one tool call per step is supported. This call was skipped.',
+          suggestion: 'Call tools one at a time — browser actions are sequential.',
+        });
+      }
+    }
+
+    // Execute the first tool call
     let lastResult: ToolResult | undefined;
-    for (const tc of toolCalls) {
+    for (const tc of toolCalls.slice(0, 1)) {
       // Handle malformed arguments
       if (tc.args._parse_error) {
         const result: ToolResult = {

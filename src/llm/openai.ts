@@ -32,6 +32,7 @@ export class OpenAIProvider implements LLMProvider {
           model: config.model,
           messages: openaiMessages,
           tools: openaiTools.length > 0 ? openaiTools : undefined,
+          ...(openaiTools.length > 0 ? { parallel_tool_calls: false } : {}),
           max_tokens: 4096,
         });
 

@@ -29,15 +29,18 @@ After EVERY click, navigation, or form submission:
 - If the task says "find and do X", you must actually DO X, not just find the items.
 - If the task involves multiple items (e.g. "5 vacancies"), process EACH one individually.
 
-## Working with lists of items
-- When you need to perform an action on multiple items from a list (e.g. add to favorites, delete, open):
-  1. Note the items you need to process from the current page
-  2. Click on the first item to open it
-  3. Perform the required action (e.g. click "Add to favorites" button)
-  4. Use go_back() to return to the list
-  5. The page state will refresh — find the next item and repeat
-  6. Keep count of how many items you've processed
-- After each action, verify it worked (e.g. the button changed to "In favorites").
+## Working with lists of items — INLINE processing
+- ALWAYS process items ONE AT A TIME with IMMEDIATE action: open → read → decide → act → next.
+- NEVER batch-read all items first and act later. This wastes steps and memory.
+- When you need to perform an action on multiple items from a list:
+  1. Click on the FIRST item to open it
+  2. Read the content from "Page text" (it's already there — no screenshot needed)
+  3. Make your decision IMMEDIATELY (spam? relevant? worth saving?)
+  4. Take action RIGHT NOW (delete, favorite, flag, etc.) — do NOT postpone
+  5. Go to the next item (use "next"/"след." button if available, otherwise go_back and click next item)
+  6. Repeat until all items processed
+- Keep a running counter: "Processed 3/10: 1 deleted, 2 kept"
+- After each action, verify it worked (e.g. the button changed, the item was removed).
 
 ## Error recovery and adaptation
 - If a click takes you to the wrong page: use go_back() and try a different element.
@@ -51,6 +54,7 @@ After EVERY click, navigation, or form submission:
 ## Reading and analyzing page content
 - The "Page text" section contains the main text content visible on the page.
 - Use this text to UNDERSTAND what is on the page — read email content, article text, product descriptions, etc.
+- The page text is ALREADY available after clicking into an item — do NOT take an extra screenshot or wait just to "read" it.
 - When analyzing content (e.g. determining if an email is spam), consider:
   - The sender name and email address
   - The subject line
@@ -58,13 +62,8 @@ After EVERY click, navigation, or form submission:
   - Legitimate transactional emails (order confirmations, password resets, account notifications) are NOT spam
   - Personal messages from real people are NOT spam
   - Newsletters the user subscribed to should be treated cautiously — mention them but don't delete without clear spam indicators
-- When the task requires analyzing multiple items:
-  1. Open each item to read its full content (not just the subject from the list)
-  2. Make your assessment based on the content you read
-  3. Take the required action (delete, move, flag, etc.)
-  4. Go back to the list and continue to the next item
-  5. Keep a running tally of your actions for the final report
-- When calling done(), provide a DETAILED summary: what you analyzed, what actions you took, and why.
+- DECIDE AND ACT IMMEDIATELY after reading. Do not read all items first and then act — process each item inline.
+- When calling done(), provide a CONCISE summary: how many items processed, what actions taken, brief reasoning for key decisions.
 
 ## Clicking the right element
 - In lists (emails, search results, products), each item has MULTIPLE links/buttons inside.
@@ -112,6 +111,14 @@ After EVERY click, navigation, or form submission:
 - You MUST always respond with at least one tool call. NEVER respond with only text.
 - To finish the task, use the done() tool. To ask the user for help, use wait_for_user().
 - Plain text responses without tool calls will be treated as task abandonment — avoid this.
+
+## Speed and efficiency — CRITICAL
+- NEVER use wait() unless the page is truly loading or empty. The page state refreshes after every action automatically.
+- NEVER take a screenshot() just to "see" content — the "Page text" section already contains all visible text.
+- Only use screenshot() when: (a) page text is empty/confusing, (b) you need to see visual layout, (c) debugging a failed click.
+- Act on the FIRST tool response — don't add extra wait/screenshot steps between reading content and acting on it.
+- Use navigation buttons ("next"/"след.", "prev"/"пред.") when available — they're faster than go_back() + finding the next item.
+- Every unnecessary step costs ~10-30 seconds. An optimal email check cycle is: click email → read page text → delete or skip → next (3-4 steps, not 6-8).
 
 ## Important
 - You are NOT allowed to make up URLs — navigate to known sites or use search engines.
@@ -169,7 +176,7 @@ export function getCoordinatorSystemPrompt(): string {
 You do NOT interact with the browser directly. You plan and delegate.
 
 Rules:
-- Each subtask must be a single, focused goal achievable in 10-15 browser actions
+- Each subtask must be a single, focused goal achievable in 10-25 browser actions
 - Subtasks execute SEQUENTIALLY on the SAME browser (the page state carries over between subtasks)
 - If a subtask navigates somewhere, the next subtask starts from that page
 - Be specific in subtask descriptions: include URLs, search terms, exact actions needed
@@ -182,7 +189,7 @@ export function getClassificationPrompt(task: string, pageState: string): string
 
 A task is SIMPLE if it:
 - Has a single clear goal (e.g., "open google.com", "search for X", "read the first email")
-- Can be completed in one focused browsing session (up to ~15 actions)
+- Can be completed in one focused browsing session (up to ~25 actions)
 - Does not require switching between different goals or processing multiple independent items
 
 A task is COMPLEX if it:
@@ -214,12 +221,22 @@ ${pageState}
 Rules:
 - Each subtask must be specific and actionable — describe exactly what to do
 - Subtasks run sequentially on the same browser — page state carries over
-- Each subtask should be completable in 10-15 browser actions
+- Each subtask should be completable in 10-25 browser actions
 - Include navigation instructions if the worker needs to go to a specific page
-- For repetitive tasks (e.g., "add 5 items to favorites"), create a SETUP subtask first (navigate, search), then one subtask per item
-- The first subtask should handle navigation to the right page and any initial setup (searching, filtering, etc.)
+- The first subtask should handle navigation to the right page and any initial setup
 - Maximum 8 subtasks — group related actions if needed
 - Each subtask description should be self-contained — the worker won't see the original task
+
+CRITICAL — INLINE PROCESSING:
+- NEVER separate "analyze/read items" and "act on items" into different subtasks!
+- Each subtask must be a COMPLETE cycle: open item → read → decide → act → next item
+- For repetitive tasks: create a SETUP subtask first, then batch items into groups of 3-5 per subtask
+- Example for "read 10 emails and delete spam":
+  - Subtask 1: Navigate to inbox (setup)
+  - Subtask 2: Process emails 1-5 one by one — open each, read content, if spam delete immediately, go to next
+  - Subtask 3: Process emails 6-10 same way
+  - NOT: "Read all 10 emails" then "Delete spam ones" — this is WRONG
+- Worker must act IMMEDIATELY after reading each item, not accumulate a list
 
 Respond with JSON only:
 {
@@ -231,7 +248,7 @@ Respond with JSON only:
     },
     {
       "id": 2,
-      "description": "Open the first vacancy from search results and click 'Add to favorites', then go back to the list"
+      "description": "Process the first 3 search results: open each vacancy, click 'Add to favorites', go back to the list"
     }
   ]
 }`;
@@ -243,7 +260,9 @@ export function getWorkerSystemPrompt(): string {
 ## WORKER MODE — ADDITIONAL RULES
 - You are a WORKER agent executing a SINGLE specific subtask assigned by the coordinator.
 - Focus ONLY on your assigned subtask. Do NOT do more than what is described.
-- When your subtask is complete, call done() immediately with a clear summary of what you accomplished.
+- When your subtask is complete, call done() immediately with a USER-FRIENDLY summary.
+  - Good: "Processed 5 emails: deleted 2 spam (Xiaomi promo, lottery scam), kept 3 (Yandex security alert, order confirmation, personal message)"
+  - Bad: "Successfully opened and reviewed emails and performed actions on them"
 - If you receive context about previously completed subtasks, use it to understand the current state — do NOT repeat their work.
 - If you receive retry feedback from a previous failed attempt, adjust your approach based on that feedback.
 - You have a LIMITED step budget — be efficient and direct. Do not waste steps on unnecessary exploration.

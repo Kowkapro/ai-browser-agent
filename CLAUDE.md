@@ -112,8 +112,8 @@ npx tsx src/index.ts
 | `OPENAI_API_KEY` | yes* | — | OpenAI API key |
 | `ANTHROPIC_API_KEY` | yes* | — | Anthropic API key (alternative) |
 | `LLM_MODEL` | no | `gpt-4.1` / `claude-sonnet-4-20250514` | Model ID (auto-validated against provider) |
-| `MAX_ITERATIONS` | no | `50` | Total step budget across all workers |
-| `WORKER_MAX_STEPS` | no | `15` | Max steps per worker (per subtask) |
+| `MAX_ITERATIONS` | no | `100` | Total step budget across all workers |
+| `WORKER_MAX_STEPS` | no | `30` | Max steps per worker (per subtask) |
 
 *At least one API key required.
 
@@ -145,8 +145,8 @@ npx tsx src/index.ts
 | DOM snapshot пустой (SPA loading) | Агент может использовать `wait(2)` + `screenshot()` для повторной попытки |
 | ref не найден (страница изменилась) | Tool возвращает error, агент получает свежий snapshot |
 | Worker зациклился (3+ одинаковых действия) | WARNING injection в prompt, Worker меняет стратегию |
-| Превышен worker_max_steps (15) | Worker останавливается, Coordinator пробует retry |
-| Превышен max_iterations (50 total) | Coordinator останавливается и сообщает о неполном выполнении |
+| Превышен worker_max_steps (30) | Worker останавливается, Coordinator пробует retry |
+| Превышен max_iterations (100 total) | Coordinator останавливается и сообщает о неполном выполнении |
 | LLM отвечает без tool calls 3+ раз подряд | Worker завершается с ошибкой (защита от бесконечного цикла) |
 | Validator не подтвердил подзадачу | Worker retry с feedback (макс. 2 retry), затем re-planning |
 
@@ -167,3 +167,6 @@ npx tsx src/index.ts
 | Осцилляция не ловится | isLooping проверял только A-A-A | Расширено на A-B-A-B паттерны (4 последних шага) | fixed |
 | Дублирование скриншотов | Screenshot после click + в main loop | Убран screenshot из doClick, оставлен только в main loop | fixed |
 | Malformed JSON в tool_calls | JSON parse → пустой args → cryptic error | `_parse_error` flag → skip execution, return error | fixed |
+| Parallel tool_calls → 400 error | LLM возвращает несколько tool_calls, tool_call_id теряются | `parallel_tool_calls: false` в OpenAI API + defensive skip в worker | fixed |
+| Worker step limit слишком мал | 15 шагов не хватает для bulk-операций (10 писем) | Увеличен дефолт до 30 | fixed |
+| Global step budget исчерпан | 50 шагов мало для complex задач с retry | Увеличен дефолт до 100 | fixed |

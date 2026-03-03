@@ -163,14 +163,27 @@ export async function runCoordinator(
   await hideAgentOverlay(getActivePage());
 
   const allCompleted = subtasks.every(s => s.status === 'completed');
-  const resultLines = subtasks.map(s =>
-    `${s.status === 'completed' ? '[OK]' : '[FAIL]'} ${s.description}${s.result ? ' → ' + s.result : ''}`
-  );
-  const resultSummary = resultLines.join('\n');
+
+  // Build user-friendly report: last completed subtask's result is the most useful summary
+  const completedResults = subtasks
+    .filter(s => s.status === 'completed' && s.result)
+    .map(s => s.result!);
+  const failedResults = subtasks
+    .filter(s => s.status === 'failed')
+    .map(s => s.description);
+
+  let report = '';
+  if (completedResults.length > 0) {
+    // Use the last completed result as the main summary (it's usually the most comprehensive)
+    report = completedResults[completedResults.length - 1];
+  }
+  if (failedResults.length > 0) {
+    report += `\n\nНе выполнено: ${failedResults.join('; ')}`;
+  }
 
   return {
     success: allCompleted,
-    result: resultSummary,
+    result: report || 'Задача завершена.',
     totalSteps,
     subtasksCompleted: completedCount,
     subtasksTotal: subtasks.length,
