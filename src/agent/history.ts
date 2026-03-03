@@ -1,4 +1,4 @@
-import type { Message, MessageContent, ToolUseContent, TextContent } from '../llm/provider.js';
+import type { Message } from '../llm/provider.js';
 
 const RECENT_STEPS_LIMIT = 5;
 
@@ -50,10 +50,22 @@ export class ConversationHistory {
     if (systemMsg) result.push(systemMsg);
     if (taskMsg) result.push(taskMsg);
 
-    // How many message pairs to keep in full (each step = ~2 messages: assistant + tool)
-    const recentCount = RECENT_STEPS_LIMIT * 2;
+    // Group conversation into "turns": each turn starts with an assistant message
+    // and includes all following tool results + the next user message (page state).
+    // This ensures we never break assistant→tool pairs.
+    const turns: Message[][] = [];
+    let currentTurn: Message[] = [];
 
-    if (convMessages.length > recentCount) {
+    for (const msg of convMessages) {
+      if (msg.role === 'assistant' && currentTurn.length > 0) {
+        turns.push(currentTurn);
+        currentTurn = [];
+      }
+      currentTurn.push(msg);
+    }
+    if (currentTurn.length > 0) turns.push(currentTurn);
+
+    if (turns.length > RECENT_STEPS_LIMIT) {
       // Compress old steps into a summary
       const oldStepsCount = Math.max(0, this.stepSummaries.length - RECENT_STEPS_LIMIT);
       if (oldStepsCount > 0) {
@@ -64,9 +76,11 @@ export class ConversationHistory {
         });
       }
 
-      // Keep recent messages in full
-      const recent = convMessages.slice(-recentCount);
-      result.push(...recent);
+      // Keep recent turns in full (each turn = assistant + tools + user)
+      const recentTurns = turns.slice(-RECENT_STEPS_LIMIT);
+      for (const turn of recentTurns) {
+        result.push(...turn);
+      }
     } else {
       // Everything fits — keep all
       result.push(...convMessages);
