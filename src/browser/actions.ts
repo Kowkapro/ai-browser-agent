@@ -192,8 +192,8 @@ async function doGoBack(): Promise<ToolResult> {
   const page = getActivePage();
   logger.action('go_back', '');
 
-  await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 });
-  await page.waitForTimeout(800);
+  await page.goBack({ waitUntil: 'load', timeout: 10000 });
+  try { await page.waitForLoadState('networkidle', { timeout: 3000 }); } catch { /* proceed */ }
 
   return { success: true, data: `Navigated back to ${page.url()}` };
 }

@@ -159,6 +159,7 @@ export class OpenAIProvider implements LLMProvider {
           args = JSON.parse(tc.function.arguments);
         } catch {
           logger.error(`Failed to parse tool args: ${tc.function.arguments}`);
+          args = { _parse_error: true, _raw: tc.function.arguments };
         }
         content.push({
           type: 'tool_use',

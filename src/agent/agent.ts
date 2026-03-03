@@ -147,6 +147,20 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
     // Execute each tool call
     let lastResult: ToolResult | undefined;
     for (const tc of toolCalls) {
+      // Handle malformed tool call arguments
+      if (tc.args._parse_error) {
+        const result: ToolResult = {
+          success: false,
+          error: `Malformed tool call: could not parse arguments "${tc.args._raw}".`,
+          suggestion: 'Retry the tool call with valid JSON arguments.',
+        };
+        lastResult = result;
+        history.recordStep(tc.name, tc.args, result.error!);
+        addToolResult(history, tc, result);
+        logger.error(result.error!);
+        continue;
+      }
+
       const result = await executeAction(tc.name, tc.args);
       lastResult = result;
 

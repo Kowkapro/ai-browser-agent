@@ -142,8 +142,9 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'done',
     description:
-      'Signal that the task is complete. Provide a summary of what was accomplished. ' +
-      'Use this ONLY when the user\'s task has been fully completed.',
+      'Signal that the task is FULLY complete. Provide a detailed summary of what was accomplished. ' +
+      'CRITICAL: For multi-step tasks (e.g. "process 5 items"), you MUST complete ALL items before calling this. ' +
+      'Re-read the original task — if it said "do X for 5 items" and you only did 3, do NOT call done yet.',
     parameters: {
       type: 'object',
       properties: {
