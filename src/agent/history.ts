@@ -1,6 +1,6 @@
 import type { Message } from '../llm/provider.js';
 
-const RECENT_STEPS_LIMIT = 5;
+const RECENT_STEPS_LIMIT = 8;
 
 export class ConversationHistory {
   private messages: Message[] = [];

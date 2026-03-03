@@ -125,6 +125,21 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'press_key',
+    description:
+      'Press a keyboard key or key combination. Use this for: ' +
+      'Escape (close popups/modals), Tab (switch focus), Enter (submit), ' +
+      'ArrowDown/ArrowUp (navigate lists), Backspace, Delete, ' +
+      'or combinations like "Control+a" (select all), "Control+c" (copy).',
+    parameters: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: 'Key to press, e.g. "Escape", "Tab", "Enter", "ArrowDown", "Control+a"' },
+      },
+      required: ['key'],
+    },
+  },
+  {
     name: 'done',
     description:
       'Signal that the task is complete. Provide a summary of what was accomplished. ' +

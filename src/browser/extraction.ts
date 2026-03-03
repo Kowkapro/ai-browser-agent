@@ -1,12 +1,12 @@
 import type { Page } from 'playwright';
+import { logger } from '../utils/logger.js';
 
 export interface ElementRef {
   ref: number;
-  role: string;
-  name: string;
-  value?: string;
-  nth: number;       // 0-based index among elements with same role+name
-  totalSame: number; // total count of elements with same role+name
+  role: string;   // link, button, textbox, checkbox, etc.
+  name: string;   // visible text / description
+  tag: string;    // original HTML tag (a, button, input, etc.)
+  value?: string; // current value for inputs/selects/checkboxes
 }
 
 export interface PageSnapshot {
@@ -24,151 +24,246 @@ export function getRefMap(): Map<number, ElementRef> {
   return currentRefMap;
 }
 
-const INTERACTIVE_ROLES = new Set([
-  // Standard form/navigation elements
-  'link', 'button', 'textbox', 'checkbox', 'radio',
-  'combobox', 'listbox', 'option', 'menuitem', 'menu',
-  'tab', 'switch', 'slider', 'spinbutton', 'searchbox',
-  'menuitemcheckbox', 'menuitemradio', 'treeitem',
-  // Note: NOT listitem/row/article — their child links/buttons appear separately
-]);
+const MAX_ELEMENTS = 150;
+const MAX_TEXT_LENGTH = 2000;
 
-const MAX_ELEMENTS = 120;
-const MAX_TEXT_LENGTH = 3000;
-
+/**
+ * Extract page state by injecting JavaScript into the page.
+ * Walks the DOM to find all interactive elements, assigns data-agent-ref attributes,
+ * and extracts visible text for LLM context.
+ */
 export async function extractPageState(page: Page): Promise<PageSnapshot> {
   const url = page.url();
   const title = await page.title();
 
-  // Get ARIA snapshot using modern Playwright API (returns YAML string)
-  let ariaYaml = '';
+  // Inject DOM walker script
+  let rawElements: RawElement[] = [];
+  let pageText = '';
+  let extractionError = '';
+
   try {
-    ariaYaml = await page.locator('body').ariaSnapshot({ timeout: 5000 });
-  } catch {
-    // Fallback: page may not have a body yet
-    ariaYaml = '';
+    const result = await page.evaluate((maxEl: number) => {
+      try {
+        // --- Clean up previous refs ---
+        document.querySelectorAll('[data-agent-ref]').forEach(function(el) {
+          el.removeAttribute('data-agent-ref');
+        });
+
+        // --- Interactive element detection ---
+        var INTERACTIVE_TAGS = ['a', 'button', 'input', 'select', 'textarea', 'summary'];
+        var INTERACTIVE_ROLES = [
+          'button', 'link', 'textbox', 'checkbox', 'radio', 'combobox',
+          'listbox', 'option', 'menuitem', 'menu', 'tab', 'switch',
+          'slider', 'spinbutton', 'searchbox', 'treeitem',
+          'menuitemcheckbox', 'menuitemradio',
+        ];
+
+        // --- Phase 1: Find interactive elements ---
+        var elements: any[] = [];
+        var refCounter = 1;
+
+        var allEls = document.querySelectorAll('*');
+        for (var i = 0; i < allEls.length; i++) {
+          if (refCounter > maxEl) break;
+          var el = allEls[i];
+          var tag = el.tagName.toLowerCase();
+
+          // === isInteractive ===
+          var interactive = false;
+          if (INTERACTIVE_TAGS.indexOf(tag) !== -1) {
+            if (tag === 'a' && !el.hasAttribute('href')) { /* skip */ }
+            else if (tag === 'input' && (el as HTMLInputElement).type === 'hidden') { /* skip */ }
+            else interactive = true;
+          }
+          if (!interactive) {
+            var role = el.getAttribute('role');
+            if (role && INTERACTIVE_ROLES.indexOf(role) !== -1) interactive = true;
+            if (el.hasAttribute('onclick')) interactive = true;
+            if (el.getAttribute('tabindex') === '0') interactive = true;
+            if (el.getAttribute('contenteditable') === 'true') interactive = true;
+          }
+          if (!interactive) continue;
+
+          // === isVisible ===
+          var visible = true;
+          try {
+            var rect = el.getBoundingClientRect();
+            if (rect.width < 4 || rect.height < 4) visible = false;
+            if (rect.bottom < -500 || rect.top > window.innerHeight + 2000) visible = false;
+            if (visible) {
+              var style = window.getComputedStyle(el);
+              if (style.display === 'none' || style.visibility === 'hidden') visible = false;
+              if (style.opacity === '0') visible = false;
+            }
+          } catch (e) {
+            visible = false;
+          }
+          if (!visible) continue;
+
+          // === getElementText ===
+          var name = '';
+          var ariaLabel = el.getAttribute('aria-label');
+          if (ariaLabel && ariaLabel.trim()) {
+            name = ariaLabel.trim();
+          } else {
+            var titleAttr = el.getAttribute('title');
+            if (titleAttr && titleAttr.trim()) {
+              name = titleAttr.trim();
+            } else if (tag === 'input' || tag === 'textarea') {
+              name = (el as HTMLInputElement).placeholder || '';
+            } else if (tag === 'img') {
+              name = (el as HTMLImageElement).alt || '';
+            } else if (tag === 'select') {
+              var selEl = el as HTMLSelectElement;
+              var selOpt = selEl.options && selEl.options[selEl.selectedIndex];
+              name = selOpt ? selOpt.text : '';
+            } else {
+              name = (el.textContent || '').replace(/\s+/g, ' ').trim();
+              // If element has no text (e.g. overlay <a> in Yandex Mail), get text from parent
+              if (!name && el.parentElement) {
+                // Try parent's title children first (more specific)
+                var parentTitle = el.parentElement.querySelector('[title]');
+                if (parentTitle) {
+                  name = (parentTitle.getAttribute('title') || '').trim();
+                }
+                // Fallback: parent's full text content
+                if (!name) {
+                  name = (el.parentElement.textContent || '').replace(/\s+/g, ' ').trim();
+                }
+              }
+              if (!name) {
+                var ct = el.querySelector('[title]');
+                if (ct) name = (ct.getAttribute('title') || '').trim();
+                if (!name) {
+                  var imgEl = el.querySelector('img[alt]');
+                  if (imgEl) name = (imgEl.getAttribute('alt') || '').trim();
+                }
+              }
+            }
+          }
+          name = name.slice(0, 150);
+
+          // === getElementRole ===
+          var elRole = el.getAttribute('role');
+          if (!elRole || INTERACTIVE_ROLES.indexOf(elRole) === -1) {
+            if (tag === 'a') elRole = 'link';
+            else if (tag === 'button') elRole = 'button';
+            else if (tag === 'input') {
+              var inputType = (el as HTMLInputElement).type;
+              if (inputType === 'checkbox') elRole = 'checkbox';
+              else if (inputType === 'radio') elRole = 'radio';
+              else if (inputType === 'submit' || inputType === 'button') elRole = 'button';
+              else elRole = 'textbox';
+            }
+            else if (tag === 'select') elRole = 'combobox';
+            else if (tag === 'textarea') elRole = 'textbox';
+            else if (tag === 'summary') elRole = 'button';
+            else elRole = elRole || tag;
+          }
+
+          // === getElementValue ===
+          var value: string | null = null;
+          if (tag === 'input') {
+            var inp = el as HTMLInputElement;
+            if (inp.type === 'checkbox' || inp.type === 'radio') {
+              value = inp.checked ? 'checked' : 'unchecked';
+            } else {
+              value = inp.value || null;
+            }
+          } else if (tag === 'textarea') {
+            value = (el as HTMLTextAreaElement).value || null;
+          } else if (tag === 'select') {
+            var sEl = el as HTMLSelectElement;
+            var sOpt = sEl.options && sEl.options[sEl.selectedIndex];
+            value = sOpt ? sOpt.text : null;
+          } else {
+            var ac = el.getAttribute('aria-checked');
+            if (ac) value = ac === 'true' ? 'checked' : 'unchecked';
+          }
+
+          // Mark element for clicking
+          el.setAttribute('data-agent-ref', String(refCounter));
+
+          var entry: any = { ref: refCounter, role: elRole, name: name, tag: tag };
+          if (value !== null) entry.value = value;
+          elements.push(entry);
+          refCounter++;
+        }
+
+        // --- Phase 2: Extract page text for context ---
+        var textParts: string[] = [];
+
+        var headings = document.querySelectorAll('h1, h2, h3, h4');
+        for (var j = 0; j < headings.length; j++) {
+          var hText = (headings[j].textContent || '').replace(/\s+/g, ' ').trim();
+          if (hText && hText.length > 1) {
+            textParts.push('[' + headings[j].tagName + '] ' + hText);
+          }
+        }
+
+        var bodyText = (document.body.textContent || '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 2000);
+        if (bodyText) {
+          textParts.push(bodyText);
+        }
+
+        return { elements: elements, pageText: textParts.join('\n'), error: '' };
+      } catch (err: any) {
+        return { elements: [], pageText: '', error: String(err) };
+      }
+    }, MAX_ELEMENTS);
+
+    rawElements = result.elements;
+    pageText = result.pageText;
+    extractionError = result.error;
+  } catch (err) {
+    extractionError = err instanceof Error ? err.message : String(err);
   }
 
-  // Parse YAML into elements
-  const elements: ElementRef[] = [];
+  if (extractionError) {
+    logger.error(`DOM extraction error: ${extractionError}`);
+  }
+
+  // Build ref map
   currentRefMap = new Map();
-  let refCounter = 1;
+  const elements: ElementRef[] = [];
 
-  const textParts: string[] = [];
+  for (const raw of rawElements) {
+    const el: ElementRef = {
+      ref: raw.ref,
+      role: raw.role,
+      name: raw.name,
+      tag: raw.tag,
+    };
+    if (raw.value !== undefined) el.value = raw.value;
 
-  if (ariaYaml) {
-    // First pass: collect interactive elements + count duplicates
-    const rawElements: { role: string; name: string; value?: string }[] = [];
-    const dupCount: Map<string, number> = new Map();
-
-    const lines = ariaYaml.split('\n');
-    for (const line of lines) {
-      const parsed = parseAriaLine(line);
-      if (!parsed) continue;
-
-      if (INTERACTIVE_ROLES.has(parsed.role)) {
-        if (rawElements.length < MAX_ELEMENTS) {
-          rawElements.push(parsed);
-          const key = `${parsed.role}|||${parsed.name}`;
-          dupCount.set(key, (dupCount.get(key) || 0) + 1);
-        }
-      } else if (parsed.name && parsed.role !== '') {
-        textParts.push(parsed.name);
-      }
-    }
-
-    // Second pass: assign nth indices
-    const nthTracker: Map<string, number> = new Map();
-    for (const raw of rawElements) {
-      const key = `${raw.role}|||${raw.name}`;
-      const nth = nthTracker.get(key) || 0;
-      nthTracker.set(key, nth + 1);
-
-      const el: ElementRef = {
-        ref: refCounter,
-        role: raw.role,
-        name: raw.name,
-        nth,
-        totalSame: dupCount.get(key) || 1,
-      };
-      if (raw.value) el.value = raw.value;
-
-      elements.push(el);
-      currentRefMap.set(refCounter, el);
-      refCounter++;
-    }
+    elements.push(el);
+    currentRefMap.set(el.ref, el);
   }
 
-  // Fallback: if ARIA snapshot found very few interactive elements,
-  // scan the DOM for clickable elements that might have been missed
-  if (elements.length < 10) {
-    try {
-      const clickableItems = await page.evaluate(() => {
-        const items: { tag: string; text: string; role: string }[] = [];
-        // Find elements with click handlers or cursor:pointer that are not already ARIA-detected
-        const candidates = document.querySelectorAll(
-          '[onclick], [role="listitem"], [role="row"], [role="article"], ' +
-          'a[href], [data-click-action], [tabindex="0"]'
-        );
-        for (const el of candidates) {
-          if (items.length >= 30) break;
-          const text = (el.textContent || '').trim().slice(0, 100);
-          if (!text || text.length < 3) continue;
-          const role = el.getAttribute('role') || el.tagName.toLowerCase();
-          items.push({ tag: el.tagName.toLowerCase(), text, role });
-        }
-        return items;
-      });
+  logger.info(`Найдено ${elements.length} интерактивных элементов`);
 
-      for (const item of clickableItems) {
-        if (refCounter > MAX_ELEMENTS) break;
-        // Skip if we already have this element from ARIA
-        const alreadyExists = elements.some(e => e.name === item.text);
-        if (alreadyExists) continue;
-
-        const role = item.role || 'button';
-        const el: ElementRef = {
-          ref: refCounter,
-          role,
-          name: item.text,
-          nth: 0,
-          totalSame: 1,
-        };
-        elements.push(el);
-        currentRefMap.set(refCounter, el);
-        refCounter++;
-      }
-    } catch { /* page might not be ready */ }
+  if (pageText.length > MAX_TEXT_LENGTH) {
+    pageText = pageText.slice(0, MAX_TEXT_LENGTH) + '\n... (text truncated)';
   }
 
-  let text = textParts.join('\n');
-  if (text.length > MAX_TEXT_LENGTH) {
-    text = text.slice(0, MAX_TEXT_LENGTH) + '\n... (text truncated)';
-  }
-
-  const formatted = formatSnapshot(url, title, elements, text);
-  return { url, title, elements, text, formatted };
+  const formatted = formatSnapshot(url, title, elements, pageText);
+  return { url, title, elements, text: pageText, formatted };
 }
 
-// Parse a single ARIA YAML line like:
-//   "- link \"Google\"" or "  - textbox \"Search\" [value=\"hello\"]"
-function parseAriaLine(line: string): { role: string; name: string; value?: string } | null {
-  // Match pattern: optional indent + "- role" + optional quoted name + optional attributes
-  const match = line.match(/^\s*-\s+(\w+)(?:\s+"([^"]*)")?(?:\s+\[(.+)\])?/);
-  if (!match) return null;
+// === Types for the injected script result ===
 
-  const role = match[1].toLowerCase();
-  const name = match[2] || '';
-  const attrs = match[3] || '';
-
-  let value: string | undefined;
-  if (attrs) {
-    const valueMatch = attrs.match(/value="([^"]*)"/);
-    if (valueMatch) value = valueMatch[1];
-  }
-
-  return { role, name, value };
+interface RawElement {
+  ref: number;
+  role: string;
+  name: string;
+  tag: string;
+  value?: string;
 }
+
+// === Formatting ===
 
 function formatSnapshot(
   url: string,
@@ -186,7 +281,7 @@ function formatSnapshot(
     lines.push('Interactive elements:');
     for (const el of elements) {
       let line = `  [${el.ref}] ${el.role} "${el.name}"`;
-      if (el.value) line += ` value="${el.value}"`;
+      if (el.value) line += ` [value="${el.value}"]`;
       lines.push(line);
     }
     if (elements.length >= MAX_ELEMENTS) {

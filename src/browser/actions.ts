@@ -25,10 +25,11 @@ export async function executeAction(
       case 'go_back':       return await doGoBack();
       case 'screenshot':    return await doScreenshot();
       case 'wait':          return await doWait(args);
+      case 'press_key':     return await doPressKey(args);
       case 'wait_for_user': return await doWaitForUser(args);
       case 'done':          return doDone(args);
       default:
-        return { success: false, error: `Unknown tool: ${toolName}`, suggestion: 'Use one of: navigate, click, type_text, select_option, scroll, go_back, screenshot, wait, wait_for_user, done.' };
+        return { success: false, error: `Unknown tool: ${toolName}`, suggestion: 'Use one of: navigate, click, type_text, select_option, scroll, go_back, screenshot, press_key, wait, wait_for_user, done.' };
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -74,10 +75,32 @@ async function doClick(args: Record<string, unknown>): Promise<ToolResult> {
   logger.action('click', `[${ref}] ${element.role} "${element.name}"`);
 
   const locator = buildLocator(page, element);
-  await locator.click({ timeout: 5000 });
+
+  try {
+    // Normal click with actionability checks
+    await locator.click({ timeout: 5000 });
+  } catch {
+    // Fallback 1: force click (bypasses pointer event interception)
+    try {
+      logger.info('Normal click blocked — trying force click...');
+      await locator.click({ timeout: 3000, force: true });
+    } catch {
+      // Fallback 2: JavaScript click (bypasses all Playwright checks)
+      logger.info('Force click failed — trying JS click...');
+      await page.evaluate((r) => {
+        const el = document.querySelector(`[data-agent-ref="${r}"]`);
+        if (el) (el as HTMLElement).click();
+      }, ref);
+    }
+  }
+
   await page.waitForTimeout(800);
 
-  return { success: true, data: `Clicked [${ref}] ${element.role} "${element.name}"` };
+  // Auto-screenshot after click for visual verification
+  let screenshot: Buffer | undefined;
+  try { screenshot = await takeScreenshot(); } catch { /* ignore */ }
+
+  return { success: true, data: `Clicked [${ref}] ${element.role} "${element.name}"`, screenshot };
 }
 
 async function doTypeText(args: Record<string, unknown>): Promise<ToolResult> {
@@ -175,6 +198,19 @@ async function doWait(args: Record<string, unknown>): Promise<ToolResult> {
   return { success: true, data: `Waited ${seconds} seconds` };
 }
 
+async function doPressKey(args: Record<string, unknown>): Promise<ToolResult> {
+  const key = args.key as string;
+  if (!key) return { success: false, error: 'Missing "key" parameter.', suggestion: 'Provide a key like "Escape", "Tab", "Enter", "ArrowDown", or "Control+a".' };
+
+  const page = getActivePage();
+  logger.action('press_key', key);
+
+  await page.keyboard.press(key);
+  await page.waitForTimeout(500);
+
+  return { success: true, data: `Pressed key: ${key}` };
+}
+
 async function doWaitForUser(args: Record<string, unknown>): Promise<ToolResult> {
   const reason = args.reason as string || 'Выполните действие в браузере.';
 
@@ -222,13 +258,6 @@ function refNotFoundResult(ref: number): ToolResult {
 }
 
 function buildLocator(page: ReturnType<typeof getActivePage>, element: ElementRef) {
-  // Use exact name matching to avoid substring collisions
-  let locator = page.getByRole(element.role as any, { name: element.name, exact: true });
-
-  // If multiple elements share the same role+name, use .nth() to pick the right one
-  if (element.totalSame > 1) {
-    locator = locator.nth(element.nth);
-  }
-
-  return locator;
+  // Use data-agent-ref attribute set during DOM extraction — unique per element
+  return page.locator(`[data-agent-ref="${element.ref}"]`);
 }

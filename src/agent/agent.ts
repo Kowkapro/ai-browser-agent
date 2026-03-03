@@ -2,9 +2,9 @@ import type { LLMProvider, MessageContent, ToolUseContent, TextContent } from '.
 import { toolDefinitions } from '../browser/tools.js';
 import { executeAction, type ToolResult } from '../browser/actions.js';
 import { extractPageState } from '../browser/extraction.js';
-import { getActivePage, showAgentOverlay, hideAgentOverlay } from '../browser/browser.js';
+import { getActivePage, showAgentOverlay, hideAgentOverlay, takeScreenshot } from '../browser/browser.js';
 import { ConversationHistory } from './history.js';
-import { getSystemPrompt, getPlanningPrompt, getReflectionPrompt, getLoopWarning } from './prompt.js';
+import { getSystemPrompt, getPlanningPrompt, getReflectionPrompt, getLoopWarning, getOutcomeAssessmentPrompt } from './prompt.js';
 import { config } from '../utils/config.js';
 import { logger } from '../utils/logger.js';
 
@@ -177,13 +177,30 @@ export async function runAgent(task: string, llm: LLMProvider): Promise<AgentRes
 
     // Get fresh page state and append as user message
     const snapshot = await extractPageState(currentPage);
-    history.addMessage({
-      role: 'user',
-      content: [{
-        type: 'text',
-        text: `Current browser state:\n${snapshot.formatted}`,
-      }],
-    });
+
+    // Build outcome assessment for the last action
+    const lastTc = toolCalls[toolCalls.length - 1];
+    const outcomeHint = getOutcomeAssessmentPrompt(
+      lastTc.name, lastTc.args,
+      snapshot.url,
+    );
+
+    // Take a screenshot for visual context (helps agent verify outcomes)
+    const pageContent: MessageContent[] = [{
+      type: 'text',
+      text: `${outcomeHint}\n\nCurrent browser state:\n${snapshot.formatted}`,
+    }];
+
+    try {
+      const screenshotBuf = await takeScreenshot();
+      pageContent.push({
+        type: 'image',
+        base64: screenshotBuf.toString('base64'),
+        mediaType: 'image/png',
+      });
+    } catch { /* screenshot not critical */ }
+
+    history.addMessage({ role: 'user', content: pageContent });
   }
 
   // Max iterations reached
