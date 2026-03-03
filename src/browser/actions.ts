@@ -221,9 +221,6 @@ function refNotFoundResult(ref: number): ToolResult {
   };
 }
 
-// Roles that are containers — when clicking, prefer a child link/button inside
-const CONTAINER_ROLES = new Set(['listitem', 'row', 'gridcell', 'article']);
-
 function buildLocator(page: ReturnType<typeof getActivePage>, element: ElementRef) {
   // Use exact name matching to avoid substring collisions
   let locator = page.getByRole(element.role as any, { name: element.name, exact: true });
@@ -231,14 +228,6 @@ function buildLocator(page: ReturnType<typeof getActivePage>, element: ElementRe
   // If multiple elements share the same role+name, use .nth() to pick the right one
   if (element.totalSame > 1) {
     locator = locator.nth(element.nth);
-  }
-
-  // For container elements (email rows, list items): click a link/button inside
-  // instead of the container center (which often hits an avatar/icon)
-  if (CONTAINER_ROLES.has(element.role)) {
-    const innerLink = locator.locator('a, [role="link"]').first();
-    // Return inner link; if it doesn't exist, Playwright will fall back to the container
-    return innerLink.or(locator);
   }
 
   return locator;

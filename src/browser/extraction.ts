@@ -30,8 +30,7 @@ const INTERACTIVE_ROLES = new Set([
   'combobox', 'listbox', 'option', 'menuitem', 'menu',
   'tab', 'switch', 'slider', 'spinbutton', 'searchbox',
   'menuitemcheckbox', 'menuitemradio', 'treeitem',
-  // List/table items (email lists, search results, etc.)
-  'listitem', 'row', 'gridcell', 'article',
+  // Note: NOT listitem/row/article — their child links/buttons appear separately
 ]);
 
 const MAX_ELEMENTS = 120;

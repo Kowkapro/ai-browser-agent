@@ -41,6 +41,13 @@ export function getSystemPrompt(): string {
 - If you are stuck or going in circles, try a completely different approach.
 - NEVER call done() prematurely. Re-read the original task and verify every part is completed before finishing.
 
+## Clicking the right element
+- In lists (emails, search results, products), each item has MULTIPLE links/buttons inside.
+- To OPEN an item (email, article, vacancy), click the link with the SUBJECT/TITLE text — NOT the sender name, avatar, or icon.
+- For example, in an email list: click the link with the email subject ("Подтвердите заказ"), NOT the sender link ("Яндекс.Маркет").
+- After clicking, check the URL and page content to verify you opened the right thing.
+- If you ended up on the wrong page (e.g. filtered view instead of email content), use go_back() and try a different link.
+
 ## User interaction
 - When you encounter a login page, CAPTCHA, two-factor authentication, payment form, or anything requiring the user's personal credentials — you MUST call the wait_for_user tool. Do NOT just output text asking the user to log in.
 - NEVER respond with plain text when user action is needed. ALWAYS use the wait_for_user tool instead.
