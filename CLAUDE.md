@@ -30,7 +30,9 @@ src/
 ├── llm/
 │   ├── provider.ts       # Abstract LLM interface + factory
 │   │                      used by: agent.ts
-│   └── openai.ts         # OpenAI GPT adapter (implements LLMProvider)
+│   ├── openai.ts         # OpenAI GPT adapter (implements LLMProvider)
+│   │                      used by: provider.ts factory
+│   └── anthropic.ts      # Anthropic Claude adapter (implements LLMProvider)
 │                          used by: provider.ts factory
 ├── browser/
 │   ├── browser.ts        # Playwright browser manager (persistent profile)
@@ -39,8 +41,8 @@ src/
 │   │                      used by: agent.ts (sent to LLM)
 │   ├── actions.ts        # Tool implementations (Playwright actions)
 │   │                      calls: browser.ts, extraction.ts. used by: agent.ts
-│   └── extraction.ts     # ARIA tree -> numbered refs extraction
-│                          calls: Playwright accessibility API. used by: agent.ts, actions.ts
+│   └── extraction.ts     # DOM-based element extraction -> numbered refs
+│                          calls: page.evaluate() for DOM walking. used by: agent.ts, actions.ts
 └── utils/
     ├── config.ts         # .env loading, configuration
     │                      used by: everywhere
@@ -53,9 +55,9 @@ src/
 ```
 index.ts → browser.ts (launch Chromium)
          → agent.ts (start loop)
-              → extraction.ts (get ARIA snapshot)
+              → extraction.ts (get DOM snapshot)
               → prompt.ts (build messages)
-              → provider.ts → openai.ts (LLM call with tools)
+              → provider.ts → openai.ts / anthropic.ts (LLM call with tools)
               → actions.ts → browser.ts (execute tool in browser)
               → history.ts (save step, manage context window)
               → repeat until done/max_iterations
@@ -84,16 +86,16 @@ npx tsx src/index.ts
 |----------|----------|---------|-------------|
 | `OPENAI_API_KEY` | yes* | — | OpenAI API key |
 | `ANTHROPIC_API_KEY` | yes* | — | Anthropic API key (alternative) |
-| `LLM_MODEL` | no | `gpt-4o` | Model ID (`gpt-4o`, `gpt-4o-mini`, `claude-sonnet-4-20250514`) |
+| `LLM_MODEL` | no | `gpt-4.1` / `claude-sonnet-4-20250514` | Model ID (auto-validated against provider) |
 | `MAX_ITERATIONS` | no | `50` | Max agent steps per task |
 
 *At least one API key required.
 
 ## Key Architecture Decisions
 
-- **Element resolution via numbered refs**: ARIA snapshot возвращает `[1] button "Submit"`, агент говорит `click(ref: 1)`. Никаких хардкод-селекторов. Refs пересоздаются при каждом snapshot.
+- **Element resolution via numbered refs**: DOM extraction возвращает `[1] button "Submit"`, агент говорит `click(ref: 1)`. Никаких хардкод-селекторов. Refs пересоздаются при каждом snapshot.
 - **Persistent browser profile**: `./browser-data/` сохраняет cookies/sessions между запусками. **SECURITY: эта папка в .gitignore, содержит пароли и сессии.**
-- **Context management**: ARIA snapshots (50-100x компактнее DOM) + sliding window истории (последние 5 шагов полные, старые — однострочные summaries) + truncation при >4000 токенов.
+- **Context management**: DOM-based extraction (компактнее полного DOM) + sliding window истории (последние 8 шагов полные, старые — однострочные summaries) + truncation при >4000 символов.
 - **Self-reflection**: каждые 5 шагов агент оценивает прогресс. Loop detection при 3+ одинаковых действиях подряд.
 
 ## Conventions
@@ -108,13 +110,13 @@ npx tsx src/index.ts
 | Ситуация | Поведение |
 |----------|-----------|
 | `.env` отсутствует или ключ пустой | Crash при старте с понятным сообщением |
-| LLM API 429 (rate limit) | Retry с exponential backoff (3 попытки) |
-| LLM API 500 / network error | Retry 2 раза, затем сообщение пользователю |
+| LLM API 429 / 500 / 503 / network error | Retry с exponential backoff (3 попытки), затем сообщение пользователю |
 | Playwright timeout (элемент не найден) | Tool возвращает error + suggestion, агент пробует другой подход |
-| ARIA snapshot пустой (SPA loading) | Автоматический `wait(2s)` + retry extraction, если всё ещё пусто — screenshot fallback |
+| DOM snapshot пустой (SPA loading) | Агент может использовать `wait(2)` + `screenshot()` для повторной попытки |
 | ref не найден (страница изменилась) | Tool возвращает error, агент получает свежий snapshot |
 | Агент зациклился (3+ одинаковых действия) | WARNING injection в prompt, агент меняет стратегию |
-| Превышен max_iterations | Спрашиваем пользователя: продолжить или остановить |
+| Превышен max_iterations | Агент останавливается и сообщает о неполном выполнении |
+| LLM отвечает без tool calls 3+ раз подряд | Агент завершается с ошибкой (защита от бесконечного цикла) |
 
 ## Known Issues
 
@@ -123,5 +125,5 @@ npx tsx src/index.ts
 | Проблема | Причина | Решение | Статус |
 |----------|---------|---------|--------|
 | `punycode` deprecation warning | Node.js 24 deprecated встроенный `punycode` модуль | Косметическая проблема, не влияет на работу. Запускать с `node --no-deprecation` | minor |
-| `page.accessibility.snapshot()` removed | Playwright 1.58 удалил старый API | Заменено на `locator.ariaSnapshot()` (YAML формат) | fixed |
+| `page.accessibility.snapshot()` removed | Playwright 1.58 удалил старый API | Заменено на DOM-based extraction через `page.evaluate()` | fixed |
 | Readline ERR_USE_AFTER_CLOSE | stdin закрывается при pipe-вводе | Добавлен флаг `closed` + обработчик `rl.on('close')` | fixed |
