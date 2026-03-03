@@ -1,7 +1,7 @@
 import { getActivePage, takeScreenshot, hideAgentOverlay, showAgentOverlay } from './browser.js';
 import { getRefMap, type ElementRef } from './extraction.js';
 import { logger } from '../utils/logger.js';
-import * as readline from 'readline';
+
 
 export interface ToolResult {
   success: boolean;
@@ -236,13 +236,13 @@ async function doWaitForUser(args: Record<string, unknown>): Promise<ToolResult>
   await hideAgentOverlay(page);
   logger.statusWaitingUser(reason);
 
-  // Wait for Enter in terminal
+  // Wait for Enter in terminal (use raw stdin listener to avoid conflicting with main readline)
   await new Promise<void>((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    rl.question('', () => {
-      rl.close();
+    const onData = () => {
+      process.stdin.removeListener('data', onData);
       resolve();
-    });
+    };
+    process.stdin.on('data', onData);
   });
 
   // Restore overlay — agent takes control
