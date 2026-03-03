@@ -222,7 +222,13 @@ function refNotFoundResult(ref: number): ToolResult {
 }
 
 function buildLocator(page: ReturnType<typeof getActivePage>, element: ElementRef) {
-  // Primary strategy: getByRole with exact name
-  // This is the most reliable, no hardcoded selectors
-  return page.getByRole(element.role as any, { name: element.name, exact: false });
+  // Use exact name matching to avoid substring collisions
+  const locator = page.getByRole(element.role as any, { name: element.name, exact: true });
+
+  // If multiple elements share the same role+name, use .nth() to pick the right one
+  if (element.totalSame > 1) {
+    return locator.nth(element.nth);
+  }
+
+  return locator;
 }

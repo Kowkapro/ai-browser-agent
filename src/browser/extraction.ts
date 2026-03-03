@@ -5,6 +5,8 @@ export interface ElementRef {
   role: string;
   name: string;
   value?: string;
+  nth: number;       // 0-based index among elements with same role+name
+  totalSame: number; // total count of elements with same role+name
 }
 
 export interface PageSnapshot {
@@ -53,28 +55,45 @@ export async function extractPageState(page: Page): Promise<PageSnapshot> {
   const textParts: string[] = [];
 
   if (ariaYaml) {
+    // First pass: collect interactive elements + count duplicates
+    const rawElements: { role: string; name: string; value?: string }[] = [];
+    const dupCount: Map<string, number> = new Map();
+
     const lines = ariaYaml.split('\n');
     for (const line of lines) {
-      if (refCounter > MAX_ELEMENTS) break;
-
       const parsed = parseAriaLine(line);
       if (!parsed) continue;
 
       if (INTERACTIVE_ROLES.has(parsed.role)) {
-        const el: ElementRef = {
-          ref: refCounter,
-          role: parsed.role,
-          name: parsed.name,
-        };
-        if (parsed.value) el.value = parsed.value;
-
-        elements.push(el);
-        currentRefMap.set(refCounter, el);
-        refCounter++;
+        if (rawElements.length < MAX_ELEMENTS) {
+          rawElements.push(parsed);
+          const key = `${parsed.role}|||${parsed.name}`;
+          dupCount.set(key, (dupCount.get(key) || 0) + 1);
+        }
       } else if (parsed.name && parsed.role !== '') {
-        // Non-interactive content — collect as page text
         textParts.push(parsed.name);
       }
+    }
+
+    // Second pass: assign nth indices
+    const nthTracker: Map<string, number> = new Map();
+    for (const raw of rawElements) {
+      const key = `${raw.role}|||${raw.name}`;
+      const nth = nthTracker.get(key) || 0;
+      nthTracker.set(key, nth + 1);
+
+      const el: ElementRef = {
+        ref: refCounter,
+        role: raw.role,
+        name: raw.name,
+        nth,
+        totalSame: dupCount.get(key) || 1,
+      };
+      if (raw.value) el.value = raw.value;
+
+      elements.push(el);
+      currentRefMap.set(refCounter, el);
+      refCounter++;
     }
   }
 
