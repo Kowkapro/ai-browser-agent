@@ -212,14 +212,17 @@ async function doScreenshot(): Promise<ToolResult> {
 async function doWait(args: Record<string, unknown>): Promise<ToolResult> {
   let seconds = args.seconds as number;
   if (!seconds || seconds < 1) seconds = 1;
-  if (seconds > 10) seconds = 10;
+  if (seconds > 5) seconds = 5; // cap at 5s — longer waits waste budget
 
   logger.action('wait', `${seconds}s`);
 
   const page = getActivePage();
   await page.waitForTimeout(seconds * 1000);
 
-  return { success: true, data: `Waited ${seconds} seconds` };
+  return {
+    success: true,
+    data: `Waited ${seconds} seconds. WARNING: Page state refreshes automatically after every action — you rarely need wait(). Only use it when the page shows a loading spinner or is completely blank. Do NOT use wait() between reading content and acting on it.`,
+  };
 }
 
 async function doPressKey(args: Record<string, unknown>): Promise<ToolResult> {

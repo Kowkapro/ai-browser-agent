@@ -11,7 +11,7 @@ import { config } from '../utils/config.js';
 import { logger } from '../utils/logger.js';
 
 const REFLECTION_INTERVAL = 5;
-const MAX_TEXT_ONLY_RETRIES = 3;
+const MAX_TEXT_ONLY_RETRIES = 5;
 
 export async function runWorker(
   subtask: string,
@@ -58,9 +58,11 @@ export async function runWorker(
   let step = 0;
   let textOnlyRetries = 0;
 
-  while (step < maxSteps) {
-    step++;
-    logger.workerStep(step, maxSteps);
+  let llmCalls = 0; // total LLM round-trips (including text-only)
+  const MAX_LLM_CALLS = maxSteps * 2; // hard cap to prevent infinite text-only loops
+
+  while (step < maxSteps && llmCalls < MAX_LLM_CALLS) {
+    llmCalls++;
 
     // Build messages with context management
     const messages = history.buildMessages();
@@ -94,8 +96,13 @@ export async function runWorker(
     const textParts = response.content.filter((c): c is TextContent => c.type === 'text');
     const assistantText = textParts.map(t => t.text).join('\n');
 
-    if (assistantText) {
+    // Detect garbage output (repeated digits/chars with no meaningful content)
+    const isGarbage = assistantText.length > 50 && /^[\d\s]{50,}/.test(assistantText);
+
+    if (assistantText && !isGarbage) {
       logger.worker(assistantText.length > 200 ? assistantText.slice(0, 200) + '...' : assistantText);
+    } else if (isGarbage) {
+      logger.info('Worker: LLM вернул мусорный текст — игнорирую.');
     }
 
     history.addMessage({ role: 'assistant', content: response.content });
@@ -124,6 +131,10 @@ export async function runWorker(
       continue;
     }
     textOnlyRetries = 0;
+
+    // Count step only when a tool is actually executed (not for text-only responses)
+    step++;
+    logger.workerStep(step, maxSteps);
 
     // Browser actions are sequential — only execute the first tool call.
     // If LLM sent multiple, add skip results for the rest to keep history valid.
@@ -199,14 +210,21 @@ export async function runWorker(
       text: `${outcomeHint}\n\nCurrent browser state:\n${snapshot.formatted}`,
     }];
 
-    try {
-      const screenshotBuf = await takeScreenshot();
-      pageContent.push({
-        type: 'image',
-        base64: screenshotBuf.toString('base64'),
-        mediaType: 'image/png',
-      });
-    } catch { /* screenshot not critical */ }
+    // Only attach screenshot when it's actually useful (not on every step)
+    const needsScreenshot = !lastResult?.success // error occurred
+      || snapshot.elements.length === 0           // page may be blank
+      || lastTc.name === 'screenshot';            // explicitly requested
+
+    if (needsScreenshot) {
+      try {
+        const screenshotBuf = await takeScreenshot();
+        pageContent.push({
+          type: 'image',
+          base64: screenshotBuf.toString('base64'),
+          mediaType: 'image/png',
+        });
+      } catch { /* screenshot not critical */ }
+    }
 
     history.addMessage({ role: 'user', content: pageContent });
   }

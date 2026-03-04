@@ -19,7 +19,11 @@ export class OpenAIProvider implements LLMProvider {
   private client: OpenAI;
 
   constructor() {
-    this.client = new OpenAI({ apiKey: config.apiKey, timeout: 60_000 });
+    this.client = new OpenAI({
+      apiKey: config.apiKey,
+      ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
+      timeout: 60_000,
+    });
   }
 
   async chat(messages: Message[], tools: ToolDefinition[]): Promise<LLMResponse> {
@@ -32,7 +36,6 @@ export class OpenAIProvider implements LLMProvider {
           model: config.model,
           messages: openaiMessages,
           tools: openaiTools.length > 0 ? openaiTools : undefined,
-          ...(openaiTools.length > 0 ? { parallel_tool_calls: false } : {}),
           max_tokens: 4096,
         });
 

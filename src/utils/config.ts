@@ -17,29 +17,41 @@ dotenv.config({ path: envPath });
 
 export type LLMProviderType = 'openai' | 'anthropic';
 
-function detectProvider(): LLMProviderType {
-  if (process.env.OPENAI_API_KEY) return 'openai';
-  if (process.env.ANTHROPIC_API_KEY) return 'anthropic';
+// Detect provider from environment variables.
+// Priority: LLM_API_KEY (universal) > OPENAI_API_KEY > ANTHROPIC_API_KEY
+function detectProvider(): { type: LLMProviderType; apiKey: string } {
+  // Universal key — uses OpenAI-compatible endpoint (works with polza.ai, OpenRouter, etc.)
+  if (process.env.LLM_API_KEY) {
+    return { type: 'openai', apiKey: process.env.LLM_API_KEY };
+  }
+  if (process.env.OPENAI_API_KEY) {
+    return { type: 'openai', apiKey: process.env.OPENAI_API_KEY };
+  }
+  if (process.env.ANTHROPIC_API_KEY) {
+    return { type: 'anthropic', apiKey: process.env.ANTHROPIC_API_KEY };
+  }
 
   console.error(
     '\n[ERROR] No API key found in .env.\n' +
     'Set at least one of:\n' +
+    '  LLM_API_KEY=...         (universal, for polza.ai / OpenRouter / etc.)\n' +
     '  OPENAI_API_KEY=sk-...\n' +
     '  ANTHROPIC_API_KEY=sk-ant-...\n'
   );
   process.exit(1);
 }
 
-const provider = detectProvider();
+const { type: provider, apiKey } = detectProvider();
 
 const defaultModels: Record<LLMProviderType, string> = {
   openai: 'gpt-4.1',
   anthropic: 'claude-sonnet-4-20250514',
 };
 
-// Validate that LLM_MODEL matches the detected provider
 const model = process.env.LLM_MODEL || defaultModels[provider];
-if (process.env.LLM_MODEL) {
+
+// Only validate model/provider match when using direct provider keys (not universal LLM_API_KEY)
+if (process.env.LLM_MODEL && !process.env.LLM_API_KEY) {
   const isClaudeModel = model.startsWith('claude');
   if (isClaudeModel && provider === 'openai') {
     console.error(
@@ -70,11 +82,13 @@ if (isNaN(maxIterations) || maxIterations < 1) {
 // Worker step budget (per subtask)
 const workerMaxSteps = parseInt(process.env.WORKER_MAX_STEPS || '30', 10);
 
+// Custom base URL for OpenAI-compatible proxies (polza.ai, OpenRouter, etc.)
+const baseUrl = process.env.LLM_BASE_URL || undefined;
+
 export const config = {
   provider,
-  apiKey: provider === 'openai'
-    ? process.env.OPENAI_API_KEY!
-    : process.env.ANTHROPIC_API_KEY!,
+  apiKey,
+  baseUrl,
   model,
   maxIterations,
   workerMaxSteps,

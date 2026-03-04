@@ -164,7 +164,7 @@ export async function runCoordinator(
 
   const allCompleted = subtasks.every(s => s.status === 'completed');
 
-  // Build user-friendly report: last completed subtask's result is the most useful summary
+  // Build aggregated report from all subtasks (skip setup-only subtasks with trivial results)
   const completedResults = subtasks
     .filter(s => s.status === 'completed' && s.result)
     .map(s => s.result!);
@@ -173,9 +173,11 @@ export async function runCoordinator(
     .map(s => s.description);
 
   let report = '';
-  if (completedResults.length > 0) {
-    // Use the last completed result as the main summary (it's usually the most comprehensive)
-    report = completedResults[completedResults.length - 1];
+  if (completedResults.length === 1) {
+    report = completedResults[0];
+  } else if (completedResults.length > 1) {
+    // Combine all subtask results for a complete picture
+    report = completedResults.join('\n\n');
   }
   if (failedResults.length > 0) {
     report += `\n\nНе выполнено: ${failedResults.join('; ')}`;
